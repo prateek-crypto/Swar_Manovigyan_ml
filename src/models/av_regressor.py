@@ -98,7 +98,9 @@ class AVLSTMRegressor:
     def save(self, path: str) -> None:
         if self.model is None:
             raise ValueError("Model not built/trained.")
-        self.model.save(path)
+        # Save without optimizer to minimize load-time deserialization issues
+        self.model.save(path, include_optimizer=False)
 
     def load(self, path: str) -> None:
-        self.model = tf.keras.models.load_model(path)
+        # Load without compiling to avoid metric/optimizer deserialization issues
+        self.model = tf.keras.models.load_model(path, compile=False)

@@ -81,7 +81,8 @@ class MusicRecommendationApp:
         try:
             # Load LSTM model only if TensorFlow is available
             if tf is not None and os.path.exists('models/lstm_emotion_model.h5'):
-                self.lstm_model = tf.keras.models.load_model('models/lstm_emotion_model.h5')
+                # Disable compile to avoid metric deserialization issues
+                self.lstm_model = tf.keras.models.load_model('models/lstm_emotion_model.h5', compile=False)
                 st.success("LSTM (classification) loaded!")
             else:
                 self.lstm_model = None
@@ -93,6 +94,10 @@ class MusicRecommendationApp:
                 self.av_model = AVLSTMRegressor(input_shape=(10, 128))
                 self.av_model.load('models/av_regressor.h5')
                 st.success("AV LSTM regressor loaded!")
+            elif tf is not None and os.path.exists('models/av_regressor.keras'):
+                self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                self.av_model.load('models/av_regressor.keras')
+                st.success("AV LSTM regressor loaded (.keras)!")
             else:
                 self.av_model = None
                 st.info("AV regressor not found. Train with `python -m src.train_av`." )
@@ -139,6 +144,23 @@ class MusicRecommendationApp:
         emotion_label = arousal_binary * 2 + valence_binary
         
         return emotion_label, arousal, valence
+
+    def estimate_av_from_features(self, features: np.ndarray) -> tuple[float, float]:
+        """Estimate arousal/enhanced_valence from slider features (same logic as preprocessing)."""
+        energy = float(features[0, 2])
+        loudness = float(features[0, 5])  # [-60, 0]
+        tempo = float(features[0, 7])     # [50, 200]
+        # Normalize loudness [0,1] from [-60,0]
+        loudness_norm = (loudness - (-60.0)) / (0.0 - (-60.0) + 1e-8)
+        # Normalize tempo [0,1] from [50,200]
+        tempo_norm = (tempo - 50.0) / (200.0 - 50.0 + 1e-8)
+        arousal = 0.4 * energy + 0.3 * loudness_norm + 0.3 * tempo_norm
+
+        valence = float(features[0, 8])
+        danceability = float(features[0, 1])
+        acousticness = float(features[0, 0])
+        enhanced_valence = 0.6 * valence + 0.3 * danceability + 0.1 * (1.0 - acousticness)
+        return arousal, enhanced_valence
     
     def create_audio_features_form(self):
         """Create form for audio features input"""
@@ -404,17 +426,23 @@ class MusicRecommendationApp:
             # Predict emotion
             if st.button("🔮 Predict Emotion", type="primary"):
                 with st.spinner("Analyzing your mood..."):
-                    # LSTM prediction
-                    lstm_emotion, lstm_conf, lstm_probs = self.predict_emotion_lstm(features)
-                    
-                    if lstm_emotion is not None:
-                        self.display_emotion_results(lstm_emotion, lstm_conf)
-                        self.display_music_recommendations(lstm_emotion)
-                        
-                        # Model comparison
-                        self.display_model_comparison(features)
+                    if self.lstm_model is not None:
+                        lstm_emotion, lstm_conf, lstm_probs = self.predict_emotion_lstm(features)
+                        if lstm_emotion is not None:
+                            self.display_emotion_results(lstm_emotion, lstm_conf)
+                            self.display_music_recommendations(lstm_emotion)
+                            # Model comparison
+                            self.display_model_comparison(features)
+                        else:
+                            st.error("Unable to make prediction with LSTM.")
                     else:
-                        st.error("Unable to make prediction. Please check if models are loaded.")
+                        # Fallback: estimate AV directly from sliders and map to quadrant
+                        arousal, valence = self.estimate_av_from_features(features)
+                        arousal_bin = 1 if arousal > 0.5 else 0
+                        valence_bin = 1 if valence > 0.5 else 0
+                        emotion_label = arousal_bin * 2 + valence_bin
+                        self.display_emotion_results(emotion_label, 1.0, arousal, valence)
+                        self.display_music_recommendations(emotion_label)
         
         else:  # Audio Upload (A/V)
             st.subheader("🎙️ Upload Audio (wav/mp3)")
@@ -427,7 +455,7 @@ class MusicRecommendationApp:
                     with st.spinner("Extracting features and predicting..."):
                         # Load checkpoint dynamically if provided
                         if os.path.exists(ckpt) and tf is not None:
-                            if self.av_model is None or ckpt != 'models/av_regressor.h5':
+                            if self.av_model is None or ckpt not in ['models/av_regressor.h5', 'models/av_regressor.keras']:
                                 try:
                                     self.av_model = AVLSTMRegressor(input_shape=(10, 128))
                                     self.av_model.load(ckpt)

@@ -36,7 +36,6 @@ Swar_Manovigyan_ML/
 │  └─ processed/
 ├─ models/                     # Checkpoints (not tracked)
 ├─ requirements.txt
-├─ LICENSE
 └─ README.md
 ```
 
@@ -73,6 +72,3 @@ streamlit run src/frontend/app.py
 - Add physiological signals (multi-modal, multi-task)
 - Attention over frames for interpretability
 - A/V → recommendation engine with user constraints
-
-## License
-MIT (see LICENSE)
