@@ -32,6 +32,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from models.lstm_model import EmotionLSTM
 from models.baseline_models import BaselineModels
+from models.av_regressor import AVLSTMRegressor
+from utils.audio_features import extract_mel_spectrogram_sequence
 
 class MusicRecommendationApp:
     """
@@ -80,13 +82,20 @@ class MusicRecommendationApp:
             # Load LSTM model only if TensorFlow is available
             if tf is not None and os.path.exists('models/lstm_emotion_model.h5'):
                 self.lstm_model = tf.keras.models.load_model('models/lstm_emotion_model.h5')
-                st.success("LSTM model loaded successfully!")
+                st.success("LSTM (classification) loaded!")
             else:
                 self.lstm_model = None
                 if tf is None:
-                    st.info("TensorFlow not available. Running in baseline-only mode.")
-                else:
-                    st.warning("LSTM model not found. Please train the model first.")
+                    st.info("TensorFlow not available. Running without LSTM classifier.")
+            
+            # Load AV regressor if available
+            if tf is not None and os.path.exists('models/av_regressor.h5'):
+                self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                self.av_model.load('models/av_regressor.h5')
+                st.success("AV LSTM regressor loaded!")
+            else:
+                self.av_model = None
+                st.info("AV regressor not found. Train with `python -m src.train_av`." )
             
             # Load baseline models
             self.baseline_models = BaselineModels()
@@ -96,6 +105,7 @@ class MusicRecommendationApp:
             st.error(f"Error loading models: {str(e)}")
             self.lstm_model = None
             self.baseline_models = None
+            self.av_model = None
     
     def create_emotion_input_form(self):
         """Create form for manual emotion input"""
@@ -188,6 +198,18 @@ class MusicRecommendationApp:
             st.error(f"Error in LSTM prediction: {str(e)}")
             return None, None, None
     
+    def predict_av_from_audio(self, audio_bytes: bytes):
+        if self.av_model is None:
+            return None
+        try:
+            features, _, _ = extract_mel_spectrogram_sequence(audio_bytes)
+            X = features[None, ...]
+            av = self.av_model.predict(X)[0]
+            return float(av[0]), float(av[1])
+        except Exception as e:
+            st.error(f"Error in AV prediction: {str(e)}")
+            return None
+    
     def predict_emotion_baseline(self, features, model_name='random_forest'):
         """Predict emotion using baseline models"""
         if self.baseline_models is None or model_name not in self.baseline_models.models:
@@ -243,10 +265,10 @@ class MusicRecommendationApp:
                 ))
             
             # Add quadrant labels
-            fig.add_annotation(x=0.25, y=0.25, text="Sad<br>Depressed", showarrow=False, font=dict(size=10))
-            fig.add_annotation(x=0.75, y=0.25, text="Calm<br>Peaceful", showarrow=False, font=dict(size=10))
-            fig.add_annotation(x=0.25, y=0.75, text="Angry<br>Stressed", showarrow=False, font=dict(size=10))
-            fig.add_annotation(x=0.75, y=0.75, text="Happy<br>Excited", showarrow=False, font=dict(size=10))
+            fig.add_annotation(x=0.25, y=0.25, text="Sad\nDepressed", showarrow=False, font=dict(size=10))
+            fig.add_annotation(x=0.75, y=0.25, text="Calm\nPeaceful", showarrow=False, font=dict(size=10))
+            fig.add_annotation(x=0.25, y=0.75, text="Angry\nStressed", showarrow=False, font=dict(size=10))
+            fig.add_annotation(x=0.75, y=0.75, text="Happy\nExcited", showarrow=False, font=dict(size=10))
             
             fig.update_layout(
                 title="Arousal-Valence Space",
@@ -365,7 +387,7 @@ class MusicRecommendationApp:
         
         input_method = st.sidebar.radio(
             "Choose Input Method:",
-            ["Manual Emotion Selection", "Audio Features Input"]
+            ["Manual Emotion Selection", "Audio Features Input", "Audio Upload (A/V)"]
         )
         
         # Main content
@@ -376,7 +398,7 @@ class MusicRecommendationApp:
             self.display_emotion_results(emotion_label, 1.0, arousal, valence)
             self.display_music_recommendations(emotion_label)
         
-        else:  # Audio Features Input
+        elif input_method == "Audio Features Input":
             features = self.create_audio_features_form()
             
             # Predict emotion
@@ -394,12 +416,44 @@ class MusicRecommendationApp:
                     else:
                         st.error("Unable to make prediction. Please check if models are loaded.")
         
+        else:  # Audio Upload (A/V)
+            st.subheader("🎙️ Upload Audio (wav/mp3)")
+            uploaded = st.file_uploader("Upload an audio file", type=["wav", "mp3", "flac", "ogg"])
+            ckpt = st.text_input("Checkpoint path (optional)", value="models/av_regressor.h5")
+            if uploaded is not None:
+                audio_bytes = uploaded.read()
+                st.audio(audio_bytes)
+                if st.button("🎯 Predict Arousal–Valence", type="primary"):
+                    with st.spinner("Extracting features and predicting..."):
+                        # Load checkpoint dynamically if provided
+                        if os.path.exists(ckpt) and tf is not None:
+                            if self.av_model is None or ckpt != 'models/av_regressor.h5':
+                                try:
+                                    self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                                    self.av_model.load(ckpt)
+                                    st.success("Loaded AV checkpoint.")
+                                except Exception as e:
+                                    st.error(f"Failed to load checkpoint: {e}")
+                        av = self.predict_av_from_audio(audio_bytes)
+                        if av is not None:
+                            arousal, valence = av
+                            # Map to quadrant for recos
+                            arousal_binary = 1 if arousal > 0.5 else 0
+                            valence_binary = 1 if valence > 0.5 else 0
+                            emotion_label = arousal_binary * 2 + valence_binary
+                            
+                            self.display_emotion_results(emotion_label, 1.0, arousal, valence)
+                            self.display_music_recommendations(emotion_label)
+                        else:
+                            st.warning("AV model not available. Please train or provide a checkpoint.")
+        
         # Footer
         st.markdown("---")
         st.markdown(
             "Built with ❤️ using Streamlit, TensorFlow, and scikit-learn | "
-            "Powered by LSTM emotion classification"
+            "Temporal A/V regression with LSTM"
         )
+
 
 def main():
     """Main function to run the app"""
