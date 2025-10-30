@@ -478,8 +478,7 @@ class MusicRecommendationApp:
         # Footer
         st.markdown("---")
         st.markdown(
-            "Built with ❤️ using Streamlit, TensorFlow, and scikit-learn | "
-            "Temporal A/V regression with LSTM"
+            "Built by Adit Jain, Mehir Singh and Ayush Pandey"
         )
 
 
