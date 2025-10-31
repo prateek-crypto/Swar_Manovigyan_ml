@@ -34,7 +34,7 @@ Swar_Manovigyan_ML/
 │  ├─ raw/
 │  │  └─ SpotifyFeatures.csv   # Example data (optional)
 │  └─ processed/
-├─ models/                     # Checkpoints (not tracked)
+├─ models/                     # Checkpoints
 ├─ requirements.txt
 └─ README.md
 ```
@@ -52,12 +52,12 @@ Ensure your processed CSV has `arousal` and `enhanced_valence` columns (generate
 python -m src.train_av \
   --csv data/processed/spotify_features_with_emotions.csv \
   --epochs 10 \
-  --checkpoint models/av_regressor.h5
+  --checkpoint models/av_regressor.keras
 ```
 
 ## Inference (CLI)
 ```bash
-python -m src.inference_av --audio_path path/to/audio.wav --checkpoint models/av_regressor.h5
+python -m src.inference_av --audio_path path/to/audio.wav --checkpoint models/av_regressor.keras
 ```
 
 ## Run UI

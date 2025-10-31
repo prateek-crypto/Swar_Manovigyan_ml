@@ -1,7 +1,7 @@
 """
 A/V inference from audio file or bytes.
 Usage:
-  python -m src.inference_av --audio_path path/to/audio.wav --checkpoint models/av_regressor.h5
+  python -m src.inference_av --audio_path path/to/audio.wav --checkpoint models/av_regressor.keras
 """
 
 import argparse
@@ -28,7 +28,7 @@ def predict_from_audio_bytes(audio_bytes: bytes, checkpoint: str) -> Tuple[float
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--audio_path', type=str, required=True)
-    parser.add_argument('--checkpoint', type=str, default='models/av_regressor.h5')
+    parser.add_argument('--checkpoint', type=str, default='models/av_regressor.keras')
     args = parser.parse_args()
 
     with open(args.audio_path, 'rb') as f:

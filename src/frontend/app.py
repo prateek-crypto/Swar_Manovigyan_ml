@@ -33,7 +33,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from models.lstm_model import EmotionLSTM
 from models.baseline_models import BaselineModels
 from models.av_regressor import AVLSTMRegressor
-from utils.audio_features import extract_mel_spectrogram_sequence
+from utils.audio_features import extract_mel_spectrogram_sequence, extract_tabular_features_sequence
 
 class MusicRecommendationApp:
     """
@@ -91,11 +91,11 @@ class MusicRecommendationApp:
             
             # Load AV regressor if available
             if tf is not None and os.path.exists('models/av_regressor.h5'):
-                self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                self.av_model = AVLSTMRegressor(input_shape=(10, 11))
                 self.av_model.load('models/av_regressor.h5')
                 st.success("AV LSTM regressor loaded!")
             elif tf is not None and os.path.exists('models/av_regressor.keras'):
-                self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                self.av_model = AVLSTMRegressor(input_shape=(10, 11))
                 self.av_model.load('models/av_regressor.keras')
                 st.success("AV LSTM regressor loaded (.keras)!")
             else:
@@ -224,8 +224,25 @@ class MusicRecommendationApp:
         if self.av_model is None:
             return None
         try:
-            features, _, _ = extract_mel_spectrogram_sequence(audio_bytes)
-            X = features[None, ...]
+            input_shape = self.av_model.model.input_shape  # (None, T, F)
+            expected_T = input_shape[1]
+            expected_F = input_shape[2]
+
+            if expected_F == 128:
+                mel, _, _ = extract_mel_spectrogram_sequence(audio_bytes)
+                if expected_T is not None:
+                    if mel.shape[0] > expected_T:
+                        mel = mel[:expected_T, :]
+                    elif mel.shape[0] < expected_T:
+                        pad_len = expected_T - mel.shape[0]
+                        mel = np.vstack([mel, np.zeros((pad_len, mel.shape[1]), dtype=mel.dtype)])
+                X = mel[None, ...]
+            elif expected_F == 11:
+                seq, _ = extract_tabular_features_sequence(audio_bytes, sequence_length=expected_T or 10)
+                X = seq[None, ...]
+            else:
+                raise ValueError(f"Unsupported model feature dim: expected_F={expected_F}")
+
             av = self.av_model.predict(X)[0]
             return float(av[0]), float(av[1])
         except Exception as e:
@@ -457,7 +474,7 @@ class MusicRecommendationApp:
                         if os.path.exists(ckpt) and tf is not None:
                             if self.av_model is None or ckpt not in ['models/av_regressor.h5', 'models/av_regressor.keras']:
                                 try:
-                                    self.av_model = AVLSTMRegressor(input_shape=(10, 128))
+                                    self.av_model = AVLSTMRegressor(input_shape=(10, 11))
                                     self.av_model.load(ckpt)
                                     st.success("Loaded AV checkpoint.")
                                 except Exception as e:
