@@ -80,9 +80,9 @@ class MusicRecommendationApp:
         """Load trained models"""
         try:
             # Load LSTM model only if TensorFlow is available
-            if tf is not None and os.path.exists('models/lstm_emotion_model.h5'):
+            if tf is not None and os.path.exists('models/lstm_emotion_model.keras'):
                 # Disable compile to avoid metric deserialization issues
-                self.lstm_model = tf.keras.models.load_model('models/lstm_emotion_model.h5', compile=False)
+                self.lstm_model = tf.keras.models.load_model('models/lstm_emotion_model.keras', compile=False)
                 st.success("LSTM (classification) loaded!")
             else:
                 self.lstm_model = None
@@ -90,9 +90,9 @@ class MusicRecommendationApp:
                     st.info("TensorFlow not available. Running without LSTM classifier.")
             
             # Load AV regressor if available
-            if tf is not None and os.path.exists('models/av_regressor.h5'):
+            if tf is not None and os.path.exists('models/av_regressor.keras'):
                 self.av_model = AVLSTMRegressor(input_shape=(10, 11))
-                self.av_model.load('models/av_regressor.h5')
+                self.av_model.load('models/av_regressor.keras')
                 st.success("AV LSTM regressor loaded!")
             elif tf is not None and os.path.exists('models/av_regressor.keras'):
                 self.av_model = AVLSTMRegressor(input_shape=(10, 11))
@@ -464,7 +464,7 @@ class MusicRecommendationApp:
         else:  # Audio Upload (A/V)
             st.subheader("🎙️ Upload Audio (wav/mp3)")
             uploaded = st.file_uploader("Upload an audio file", type=["wav", "mp3", "flac", "ogg"])
-            ckpt = st.text_input("Checkpoint path (optional)", value="models/av_regressor.h5")
+            ckpt = st.text_input("Checkpoint path (optional)", value="models/av_regressor.keras")
             if uploaded is not None:
                 audio_bytes = uploaded.read()
                 st.audio(audio_bytes)
@@ -472,7 +472,7 @@ class MusicRecommendationApp:
                     with st.spinner("Extracting features and predicting..."):
                         # Load checkpoint dynamically if provided
                         if os.path.exists(ckpt) and tf is not None:
-                            if self.av_model is None or ckpt not in ['models/av_regressor.h5', 'models/av_regressor.keras']:
+                            if self.av_model is None or ckpt not in ['models/av_regressor.keras']:
                                 try:
                                     self.av_model = AVLSTMRegressor(input_shape=(10, 11))
                                     self.av_model.load(ckpt)

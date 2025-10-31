@@ -3,7 +3,7 @@
 
 from typing import Optional, Tuple
 import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers, callbacks
+from keras import layers, models, optimizers, callbacks
 import numpy as np
 
 
@@ -25,10 +25,10 @@ class AVLSTMRegressor:
         self.lstm_units = lstm_units
         self.dropout_rate = dropout_rate
         self.learning_rate = learning_rate
-        self.model: Optional[tf.keras.Model] = None
+        self.model: Optional[models.Model] = None
         self.history = None
 
-    def build(self) -> tf.keras.Model:
+    def build(self) -> models.Model:
         inputs = layers.Input(shape=self.input_shape)
 
         x = layers.Bidirectional(layers.LSTM(self.lstm_units, return_sequences=True))(inputs)
@@ -50,7 +50,7 @@ class AVLSTMRegressor:
         model.compile(
             optimizer=optimizers.Adam(learning_rate=self.learning_rate),
             loss="mse",
-            metrics=[tf.keras.metrics.MeanAbsoluteError(name="mae")],
+            metrics=["mae"],
         )
 
         self.model = model
@@ -103,4 +103,4 @@ class AVLSTMRegressor:
 
     def load(self, path: str) -> None:
         # Load without compiling to avoid metric/optimizer deserialization issues
-        self.model = tf.keras.models.load_model(path, compile=False)
+        self.model = models.load_model(path, compile=False)
