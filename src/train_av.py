@@ -1,17 +1,25 @@
 """
 Train AV LSTM regressor on processed CSV with arousal and enhanced_valence targets.
 Usage:
-  python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 10 --checkpoint models/av_regressor.h5
+  python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 10 --checkpoint models/av_regressor.keras
 """
 
 import argparse
+import json
 import os
 import numpy as np
 import pandas as pd
-from typing import Tuple
+from typing import Tuple, List, Dict, Any
 
 from src.utils.data_analysis import DataPreprocessor
 from src.models.av_regressor import AVLSTMRegressor
+
+# Canonical feature column order (must match inference and app)
+FEATURE_COLUMNS: List[str] = [
+    'acousticness', 'danceability', 'energy', 'instrumentalness',
+    'liveness', 'loudness', 'speechiness', 'tempo', 'valence',
+    'arousal', 'enhanced_valence'
+]
 
 
 def build_sequences_for_regression(
@@ -19,19 +27,18 @@ def build_sequences_for_regression(
     sequence_length: int = 10,
     stride: int = 1,
     limit_sequences: int | None = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    feature_columns: List[str] | None = None,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Create sequences X (T,F) and y ([arousal, valence]) using existing feature columns.
-    Uses vectorized arrays to avoid per-iteration pandas slicing.
+    Returns (X, y, feature_stats) with feature_stats for inference z-score.
     """
-    feature_columns = [
-        'acousticness', 'danceability', 'energy', 'instrumentalness',
-        'liveness', 'loudness', 'speechiness', 'tempo', 'valence',
-        'arousal', 'enhanced_valence'
-    ]
+    cols = feature_columns or FEATURE_COLUMNS
 
     # Prepare features (fillna + standardize)
-    df_features = df[feature_columns].fillna(df[feature_columns].median())
+    df_features = df[cols].fillna(df[cols].median())
+    mean_ = df_features.mean().to_dict()
+    std_ = (df_features.std() + 1e-8).to_dict()
     features_std = (df_features - df_features.mean()) / (df_features.std() + 1e-8)
     features_np = features_std.values.astype('float32')
 
@@ -55,7 +62,13 @@ def build_sequences_for_regression(
 
     # Bound labels to [0,1]
     np.clip(y, 0.0, 1.0, out=y)
-    return X, y
+
+    feature_stats = {
+        "feature_columns": cols,
+        "mean": {k: float(v) for k, v in mean_.items()},
+        "std": {k: float(v) for k, v in std_.items()},
+    }
+    return X, y, feature_stats
 
 
 def split_train_val_test(X: np.ndarray, y: np.ndarray, val_ratio=0.2, test_ratio=0.2, seed=42):
@@ -83,11 +96,13 @@ def main():
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--checkpoint', type=str, default='models/av_regressor.h5')
+    parser.add_argument('--checkpoint', type=str, default='models/av_regressor.keras')
 
     args = parser.parse_args()
 
-    os.makedirs(os.path.dirname(args.checkpoint), exist_ok=True)
+    checkpoint_dir = os.path.dirname(args.checkpoint)
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     df = pd.read_csv(args.csv)
 
@@ -95,13 +110,19 @@ def main():
     if 'arousal' not in df.columns or 'enhanced_valence' not in df.columns:
         raise ValueError('CSV must contain columns arousal and enhanced_valence. Generate with utils.data_analysis.EmotionLabeler.')
 
-    X, y = build_sequences_for_regression(
+    X, y, feature_stats = build_sequences_for_regression(
         df,
         sequence_length=args.sequence_length,
         stride=args.stride,
         limit_sequences=args.limit_sequences,
     )
     print(f"Built sequences: X={X.shape}, y={y.shape}")
+
+    # Persist feature stats for inference (z-score)
+    stats_path = os.path.join(checkpoint_dir or ".", "feature_stats_av.json")
+    with open(stats_path, "w") as f:
+        json.dump(feature_stats, f, indent=2)
+    print(f"Saved feature stats to {stats_path}")
 
     (X_train, y_train), (X_val, y_val), (X_test, y_test) = split_train_val_test(X, y)
 
@@ -114,6 +135,7 @@ def main():
 
     reg.save(args.checkpoint)
     print(f"Saved checkpoint to {args.checkpoint}")
+    print("Inference: use feature_stats_av.json in the same directory as the checkpoint for z-score normalization.")
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ Training Pipeline for Emotion Classification
 Orchestrates the training of LSTM and baseline models
 """
 
+import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -208,11 +209,15 @@ class TrainingPipeline:
         return self.results
     
     def save_models(self):
-        """Save all trained models"""
+        """Save all trained models and the scaler for inference/app"""
         print("\nSaving models...")
         
         # Create models directory
         os.makedirs('models', exist_ok=True)
+        
+        # Save scaler used for 11-dim features (LSTM and baselines use same scaled sequences)
+        joblib.dump(self.preprocessor.scaler, os.path.join('models', 'scaler_lstm.joblib'))
+        print("Saved scaler_lstm.joblib for app inference.")
         
         # Save LSTM model
         if self.lstm_model:

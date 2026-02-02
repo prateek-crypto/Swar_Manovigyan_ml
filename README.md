@@ -26,13 +26,15 @@ Swar_Manovigyan_ML/
 │  │  ├─ av_regressor.py       # TensorFlow AV LSTM regressor
 │  │  └─ lstm_model.py         # (Optional) 4-class LSTM classifier support
 │  ├─ utils/
-│  │  ├─ audio_features.py     # Mel-spectrogram extraction
-│  │  └─ data_analysis.py      # Label creation (arousal/enhanced_valence)
-│  ├─ train_av.py              # Train AV regressor
+│  │  ├─ audio_features.py     # Mel-spectrogram + tabular extraction
+│  │  ├─ data_analysis.py      # Label creation (arousal/enhanced_valence)
+│  │  ├─ feature_stats.py      # Load/apply z-score for inference
+│  │  └─ azure_openai_service.py  # Optional Azure OpenAI explanations
+│  ├─ train_av.py              # Train AV regressor (saves feature_stats_av.json)
 │  └─ inference_av.py          # Predict A/V from audio
 ├─ data/
 │  ├─ raw/
-│  │  └─ SpotifyFeatures.csv   # Example data (optional)
+│  │  └─ SpotifyFeatures.csv   # data
 │  └─ processed/
 ├─ models/                     # Checkpoints
 ├─ requirements.txt
@@ -49,23 +51,26 @@ pip install -r requirements.txt
 ## Train
 Ensure your processed CSV has `arousal` and `enhanced_valence` columns (generate via `src/utils/data_analysis.py` if needed).
 ```bash
-python -m src.train_av \
-  --csv data/processed/spotify_features_with_emotions.csv \
-  --epochs 10 \
-  --checkpoint models/av_regressor.keras
+python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 10 --checkpoint models/av_regressor.keras
 ```
+Training saves `feature_stats_av.json` next to the checkpoint; inference and the app use it for z-score normalization.
 
 ## Inference (CLI)
 ```bash
 python -m src.inference_av --audio_path path/to/audio.wav --checkpoint models/av_regressor.keras
 ```
+Ensure `models/feature_stats_av.json` exists (created by training) for correct scaling.
 
 ## Run UI
 ```bash
 streamlit run src/frontend/app.py
 ```
-- Choose “Audio Upload (A/V)” → upload wav/mp3 → see A/V and recommendations
-- Optionally enter a different checkpoint path
+Run from **project root** so the app finds `models/` and checkpoints.  
+- Manual emotion selection; Audio Features Input (LSTM + baselines); Audio Upload (A/V)  
+- Optionally enter a different checkpoint path for A/V
+
+### Optional: Azure OpenAI
+For AI-generated therapeutic explanations and recommendation blurbs, copy `.env.example` to `.env` and set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` (and optionally `AZURE_OPENAI_API_VERSION`). Do not commit `.env`.
 
 ## Approach/Methodology/Model
 
@@ -120,6 +125,12 @@ streamlit run src/frontend/app.py
 **Visualization:** Arousal–valence scatter plot in 2D emotion space; quadrant mapping (Low/High Arousal × Negative/Positive Valence → 4 emotion classes).
 
 **Inference:** Real-time prediction from uploaded audio (wav/mp3/flac/ogg) via Streamlit UI or CLI; automatic feature extraction and sequence preparation.
+
+## Mel-spectrogram path (future)
+The codebase supports a mel-spectrogram input path (128 mel bands); currently only the **tabular (11-dim)** path is trained. To use the mel path, add a training script that builds (T, 128) sequences and train a model with input shape (T, 128). See `EVALUATION_REPORT.md`.
+
+## Development checklist
+See `TODO_SDLC.md` for a structured to-do list (data, training, app, quality, release).
 
 ## Personalization (Next Steps)
 - Fine-tune on user-specific A/V data

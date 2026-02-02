@@ -15,9 +15,12 @@ warnings.filterwarnings('ignore')
 class EmotionLabeler:
     """
     Creates emotion labels based on arousal-valence framework
-    using Spotify audio features
+    using Spotify audio features.
+    Uses fixed loudness [-60, 0] dB and tempo [50, 200] BPM for alignment with inference.
     """
-    
+    LOUDNESS_MIN, LOUDNESS_MAX = -60.0, 0.0
+    TEMPO_MIN, TEMPO_MAX = 50.0, 200.0
+
     def __init__(self):
         self.emotion_mapping = {
             0: 'Low Arousal, Negative Valence',  # Sad, Depressed
@@ -28,24 +31,22 @@ class EmotionLabeler:
         
     def create_emotion_labels(self, df):
         """
-        Create emotion labels based on arousal-valence framework
-        
-        Arousal: Based on energy, loudness, tempo
-        Valence: Based on valence, danceability, acousticness
+        Create emotion labels based on arousal-valence framework.
+        Uses fixed loudness [−60, 0] dB and tempo [50, 200] BPM for alignment with inference.
         """
-        # Calculate arousal score (0-1)
+        # Calculate arousal score (0-1) with fixed ranges
         arousal_features = ['energy', 'loudness', 'tempo']
         arousal_data = df[arousal_features].copy()
-        
-        # Normalize loudness (typically negative values)
-        arousal_data['loudness'] = (arousal_data['loudness'] - arousal_data['loudness'].min()) / \
-                                  (arousal_data['loudness'].max() - arousal_data['loudness'].min())
-        
-        # Normalize tempo
-        arousal_data['tempo'] = (arousal_data['tempo'] - arousal_data['tempo'].min()) / \
-                               (arousal_data['tempo'].max() - arousal_data['tempo'].min())
-        
-        # Calculate arousal as weighted average
+
+        # Normalize loudness to [0,1] with fixed range [-60, 0] dB
+        arousal_data['loudness'] = (arousal_data['loudness'].clip(self.LOUDNESS_MIN, self.LOUDNESS_MAX)
+                                    - self.LOUDNESS_MIN) / (self.LOUDNESS_MAX - self.LOUDNESS_MIN + 1e-8)
+
+        # Normalize tempo to [0,1] with fixed range [50, 200] BPM
+        arousal_data['tempo'] = (arousal_data['tempo'].clip(self.TEMPO_MIN, self.TEMPO_MAX)
+                                  - self.TEMPO_MIN) / (self.TEMPO_MAX - self.TEMPO_MIN + 1e-8)
+
+        # Calculate arousal as weighted average: 0.4*energy + 0.3*loudness_norm + 0.3*tempo_norm
         arousal_weights = [0.4, 0.3, 0.3]  # energy, loudness, tempo
         df['arousal'] = np.average(arousal_data, axis=1, weights=arousal_weights)
         
