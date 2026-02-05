@@ -28,6 +28,13 @@ def load_feature_stats(checkpoint_path: str) -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
+def save_feature_stats(stats: Dict[str, Any], stats_path: str) -> None:
+    """Save feature stats to JSON file."""
+    os.makedirs(os.path.dirname(stats_path) if os.path.dirname(stats_path) else ".", exist_ok=True)
+    with open(stats_path, "w") as f:
+        json.dump(stats, f, indent=2)
+
+
 def apply_zscore(features: np.ndarray, stats: Dict[str, Any]) -> np.ndarray:
     """
     Apply z-score normalization to features using loaded stats.

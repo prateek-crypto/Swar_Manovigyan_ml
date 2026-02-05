@@ -10,6 +10,10 @@ librosa>=0.9.0
 soundfile>=0.10.0
 joblib>=1.2.0
 tqdm>=4.60.0
+# Protobuf: use 5.28–5.x for TensorFlow 2.20+ and Streamlit compatibility
+protobuf>=5.28,<6
+# Testing
+pytest>=7.0.0
 # Optional: Azure OpenAI (therapeutic explanations in app)
 openai>=1.0.0
 python-dotenv>=1.0.0

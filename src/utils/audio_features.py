@@ -14,10 +14,14 @@ def extract_mel_spectrogram_sequence(
     n_mels: int = 128,
     hop_length: int = 512,
     n_fft: int = 2048,
-    target_frames: int = 300,
+    target_frames: int | None = 300,
 ) -> Tuple[np.ndarray, int, int]:
     """
     Convert an audio bytes buffer to a normalized mel-spectrogram sequence.
+
+    Args:
+        target_frames: If None, return full-length mel-spectrogram without cropping/padding.
+                      If int, crop/pad to this length.
 
     Returns
         features: np.ndarray of shape (T, F) where T=timesteps, F=n_mels
@@ -50,15 +54,18 @@ def extract_mel_spectrogram_sequence(
     # T x F (transpose)
     features = mel_norm.T  # (frames, n_mels)
 
-    # Crop or pad to target_frames
-    if features.shape[0] > target_frames:
-        features = features[:target_frames, :]
-    elif features.shape[0] < target_frames:
-        pad_len = target_frames - features.shape[0]
-        pad = np.zeros((pad_len, features.shape[1]), dtype=features.dtype)
-        features = np.vstack([features, pad])
+    original_frames = features.shape[0]
 
-    return features.astype(np.float32), sr, mel_norm.shape[1]
+    # Crop or pad to target_frames (if specified)
+    if target_frames is not None:
+        if features.shape[0] > target_frames:
+            features = features[:target_frames, :]
+        elif features.shape[0] < target_frames:
+            pad_len = target_frames - features.shape[0]
+            pad = np.zeros((pad_len, features.shape[1]), dtype=features.dtype)
+            features = np.vstack([features, pad])
+
+    return features.astype(np.float32), sr, original_frames
 
 
 def _load_audio_from_bytes(audio_bytes: bytes, target_sr: int) -> Tuple[np.ndarray, int]:
@@ -108,10 +115,20 @@ def extract_tabular_features_sequence(
     loudness_db = float(np.clip(loudness_db, -60.0, 0.0))
 
     # Tempo estimate (BPM)
+    # Prefer the non-deprecated API in newer librosa versions (>=0.10),
+    # fall back to librosa.beat.tempo for older versions.
     try:
-        tempo = float(librosa.beat.tempo(y=audio, sr=sr, hop_length=512).flatten()[0])
+        # New location in librosa 0.10+
+        from librosa.feature.rhythm import tempo as _rhythm_tempo  # type: ignore
+
+        tempo_arr = _rhythm_tempo(y=audio, sr=sr, hop_length=512)
+        tempo = float(tempo_arr.flatten()[0])
     except Exception:
-        tempo = 120.0
+        try:
+            # Backwards-compatible fallback; may emit a FutureWarning in older versions.
+            tempo = float(librosa.beat.tempo(y=audio, sr=sr, hop_length=512).flatten()[0])
+        except Exception:
+            tempo = 120.0
 
     # Acousticness proxy: inverse spectral flatness (more tonal -> higher acousticness)
     try:

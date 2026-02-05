@@ -14,6 +14,12 @@ Use this list for efficient software development lifecycle: planning, implementa
   - [ ] Train: `python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 20 --checkpoint models/av_regressor.keras`
   - [ ] Confirm `models/feature_stats_av.json` is created next to the checkpoint.
   - [ ] Run CLI inference: `python -m src.inference_av --audio_path <path> --checkpoint models/av_regressor.keras` and sanity-check A/V output.
+- [ ] **AV Regressor (mel-spectrogram) - Frame-level temporal modeling**
+  - [ ] Prepare audio files: ensure audio files match filenames in CSV (or add `filename` column to CSV).
+  - [ ] Train: `python -m src.train_av_mel --audio_dir data/audio --csv data/processed/spotify_features_with_emotions.csv --epochs 20 --checkpoint models/av_regressor_mel.keras`
+  - [ ] Confirm `models/mel_stats_av.json` is created next to the checkpoint.
+  - [ ] Run CLI inference: `python -m src.inference_av --audio_path <path> --checkpoint models/av_regressor_mel.keras` and verify frame-level sequences are used.
+  - [ ] Compare tabular vs mel model performance on test set.
 - [ ] **Classification pipeline (optional)**
   - [ ] Run `src/models/training_pipeline.py` to train LSTM + baselines; confirm `models/scaler_lstm.joblib` and `models/baseline_models/*.joblib` exist.
 
@@ -36,17 +42,25 @@ Use this list for efficient software development lifecycle: planning, implementa
 
 ---
 
-## Phase 3: Quality & Docs
+## Phase 3: Testing & Quality
 
-- [ ] **Code**
+- [ ] **Unit Tests**
+  - [ ] Run test suite: `pytest tests/` from project root.
+  - [ ] Verify all tests pass: `pytest tests/ -v`
+  - [ ] Test coverage: `pytest tests/ --cov=src --cov-report=html` (optional, requires pytest-cov)
+- [ ] **Integration Tests**
+  - [ ] Test end-to-end training pipeline (tabular): train → save → load → infer.
+  - [ ] Test end-to-end training pipeline (mel): train → save → load → infer with frame-level sequences.
+  - [ ] Test app with both tabular and mel models.
+- [ ] **Code Quality**
   - [ ] Lint/format: run project linter and fix issues.
   - [ ] No secrets in repo: ensure `.env` is in `.gitignore`; only `.env.example` (placeholders) is committed.
 - [ ] **Docs**
-  - [ ] README: setup, train, inference, run app; mention optional Azure OpenAI and `.env.example`.
-  - [ ] EVALUATION_REPORT: update “Status” for fixed items; keep “Future” items (e.g. mel-spectrogram training).
+  - [ ] README: setup, train (tabular + mel), inference, run app; mention optional Azure OpenAI and `.env.example`.
+  - [ ] EVALUATION_REPORT: update “Status” for mel-spectrogram training and testing implementation.
 - [ ] **Research**
-  - [ ] Reproducibility: fix random seeds in train_av and training_pipeline; document in README.
-  - [ ] If you add mel-spectrogram training later: document in README and EVALUATION_REPORT.
+  - [ ] Reproducibility: fix random seeds in train_av, train_av_mel, and training_pipeline; document in README.
+  - [ ] Document mel-spectrogram training approach (frame-level temporal sequences) in README and EVALUATION_REPORT.
 
 ---
 
@@ -56,8 +70,10 @@ Use this list for efficient software development lifecycle: planning, implementa
   - [ ] Tag version; update README with version and citation if needed.
   - [ ] Optional: add `requirements-azure.txt` with `openai`, `python-dotenv` for Azure-only installs.
 - [ ] **Future (non-blocking)**
-  - [ ] Mel-spectrogram model: train on (T, 128) sequences; wire inference and app to use mel path when model expects 128 features.
+  - [x] ~~Mel-spectrogram model: train on (T, 128) sequences; wire inference and app to use mel path when model expects 128 features.~~ ✅ Implemented in `train_av_mel.py` with frame-level temporal sequences.
   - [ ] User-specific fine-tuning or multi-modal (e.g. physiological signals) as per report “Future Work”.
+  - [ ] Attention mechanisms over temporal frames for interpretability.
+  - [ ] Ensemble of tabular and mel models for improved robustness.
 
 ---
 
@@ -66,7 +82,9 @@ Use this list for efficient software development lifecycle: planning, implementa
 | Task                    | Command / location |
 |-------------------------|--------------------|
 | Generate processed CSV  | `python -m src.utils.data_analysis` (from project root; ensure raw CSV path in `if __name__`) |
-| Train AV regressor     | `python -m src.train_av --checkpoint models/av_regressor.keras` |
-| CLI A/V inference       | `python -m src.inference_av --audio_path <file> --checkpoint models/av_regressor.keras` |
+| Train AV regressor (tabular) | `python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --checkpoint models/av_regressor.keras` |
+| Train AV regressor (mel) | `python -m src.train_av_mel --audio_dir data/audio --csv data/processed/spotify_features_with_emotions.csv --checkpoint models/av_regressor_mel.keras` |
+| CLI A/V inference       | `python -m src.inference_av --audio_path <file> --checkpoint models/av_regressor.keras` (or `av_regressor_mel.keras`) |
+| Run tests               | `pytest tests/ -v` |
 | Run app                 | `streamlit run src/frontend/app.py` |
 | Azure OpenAI (optional) | Set `AZURE_OPENAI_*` in `.env`; see `.env.example` |

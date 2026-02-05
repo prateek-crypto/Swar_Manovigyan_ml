@@ -27,15 +27,13 @@ def predict_from_audio_bytes(audio_bytes: bytes, checkpoint: str) -> Tuple[float
     feature_stats = load_feature_stats(checkpoint) if expected_F == 11 else None
 
     if expected_F == 128:
-        # Mel-spectrogram path (future: train a model with input (T, 128))
-        mel, _, _ = extract_mel_spectrogram_sequence(audio_bytes)
-        if expected_T is not None:
-            if mel.shape[0] > expected_T:
-                mel = mel[:expected_T, :]
-            elif mel.shape[0] < expected_T:
-                pad_len = expected_T - mel.shape[0]
-                mel = np.vstack([mel, np.zeros((pad_len, mel.shape[1]), dtype=mel.dtype)])
-        X = mel[None, ...]  # (1, T, 128)
+        # Mel-spectrogram path: extract full mel, then build frame-level sequence
+        from src.train_av_mel import build_frame_sequences_from_mel
+        mel, _, _ = extract_mel_spectrogram_sequence(audio_bytes, target_frames=None)  # Get full length
+        # Build sequence using sliding window (same as training)
+        sequences = build_frame_sequences_from_mel(mel, sequence_length=expected_T or 10, stride=1)
+        # Use the first sequence (or average multiple sequences for robustness)
+        X = sequences[0:1]  # (1, T, 128) - use first sequence
     elif expected_F == 11:
         # Tabular path: extract then z-score using training stats
         seq, _ = extract_tabular_features_sequence(audio_bytes, sequence_length=expected_T or 10)
