@@ -43,11 +43,15 @@ try:
         is_azure_openai_available,
         get_therapeutic_explanation,
         get_recommendation_blurb,
+        get_ai_music_styles,
+        get_ai_sample_tracks,
     )
 except Exception:
     is_azure_openai_available = lambda: False
     get_therapeutic_explanation = lambda *a, **k: None
     get_recommendation_blurb = lambda *a, **k: None
+    get_ai_music_styles = lambda *a, **k: None
+    get_ai_sample_tracks = lambda *a, **k: None
 
 def _models_dir():
     return os.path.join(PROJECT_ROOT, "models")
@@ -364,24 +368,70 @@ class MusicRecommendationApp:
             
             st.plotly_chart(fig, use_container_width=True)
     
-    def display_music_recommendations(self, emotion_label):
-        """Display music recommendations based on emotion"""
+    def display_music_recommendations(self, emotion_label: int, arousal: float | None = None, valence: float | None = None):
+        """Display music recommendations based on emotion.
+
+        If Azure OpenAI is available, prefers AI-generated styles and sample tracks,
+        with hardcoded defaults as a safe fallback.
+        """
         st.subheader("🎵 Music Recommendations")
-        recommendations = self.music_recommendations[emotion_label]
-        # Optional Azure OpenAI blurb
+        emotion_name = self.emotion_mapping.get(emotion_label, "Unknown Emotion")
+
+        # Base (hardcoded) recommendations as fallback
+        base_recommendations = self.music_recommendations.get(emotion_label, [])
+
+        # Prefer AI-generated style / playlist suggestions when available
+        recommendations = base_recommendations
+        if is_azure_openai_available():
+            with st.spinner("Asking AI for tailored music styles..."):
+                ai_styles = get_ai_music_styles(
+                    emotion_label,
+                    arousal if arousal is not None else 0.5,
+                    valence if valence is not None else 0.5,
+                    emotion_name,
+                )
+            if ai_styles:
+                recommendations = ai_styles
+
+        # Optional Azure OpenAI blurb tying the styles to the emotion
         if is_azure_openai_available() and recommendations:
             with st.spinner("Generating recommendation insight..."):
                 blurb = get_recommendation_blurb(emotion_label, recommendations)
             if blurb:
                 st.caption(f"💡 {blurb}")
+
         for i, rec in enumerate(recommendations, 1):
             st.markdown(f"{i}. {rec}")
         
-        # Create sample playlist
+        # Create sample playlist (AI first, fallback to demo tracks)
         st.subheader("🎧 Sample Playlist")
-        
-        # Generate sample tracks (in a real app, this would come from a music database)
-        sample_tracks = self.generate_sample_tracks(emotion_label)
+
+        sample_tracks = None
+        if is_azure_openai_available():
+            with st.spinner("Asking AI for example tracks..."):
+                ai_tracks = get_ai_sample_tracks(
+                    emotion_label,
+                    arousal if arousal is not None else 0.5,
+                    valence if valence is not None else 0.5,
+                    emotion_name,
+                )
+            if ai_tracks:
+                # Ensure each track has an id for Streamlit buttons
+                sample_tracks = []
+                for idx, t in enumerate(ai_tracks, start=1):
+                    track_id = t.get("id") or f"ai_{emotion_label}_{idx}"
+                    sample_tracks.append(
+                        {
+                            "title": t.get("title", f"Track {idx}"),
+                            "artist": t.get("artist", "Unknown Artist"),
+                            "duration": t.get("duration", "3:00"),
+                            "id": track_id,
+                        }
+                    )
+
+        # Fallback to demo playlist if AI is unavailable or failed
+        if sample_tracks is None:
+            sample_tracks = self.generate_sample_tracks(emotion_label)
         
         for track in sample_tracks:
             col1, col2, col3 = st.columns([3, 1, 1])
@@ -476,7 +526,7 @@ class MusicRecommendationApp:
             
             # Display results
             self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-            self.display_music_recommendations(emotion_label)
+            self.display_music_recommendations(emotion_label, arousal, valence)
         
         elif input_method == "Audio Features Input":
             features = self.create_audio_features_form()
@@ -489,7 +539,7 @@ class MusicRecommendationApp:
                         if lstm_emotion is not None:
                             arousal, valence = self.estimate_av_from_features(features)
                             self.display_emotion_results(lstm_emotion, lstm_conf, arousal, valence)
-                            self.display_music_recommendations(lstm_emotion)
+                            self.display_music_recommendations(lstm_emotion, arousal, valence)
                             self.display_model_comparison(sequence_11)
                         else:
                             st.error("Unable to make prediction with LSTM.")
@@ -499,7 +549,7 @@ class MusicRecommendationApp:
                         valence_bin = 1 if valence > 0.5 else 0
                         emotion_label = arousal_bin * 2 + valence_bin
                         self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-                        self.display_music_recommendations(emotion_label)
+                        self.display_music_recommendations(emotion_label, arousal, valence)
                         if getattr(self.baseline_models, 'models', None):
                             self.display_model_comparison(sequence_11)
         
@@ -530,7 +580,7 @@ class MusicRecommendationApp:
                             valence_binary = 1 if valence > 0.5 else 0
                             emotion_label = arousal_binary * 2 + valence_binary
                             self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-                            self.display_music_recommendations(emotion_label)
+                            self.display_music_recommendations(emotion_label, arousal, valence)
                         else:
                             st.warning("AV model not available. Please train or provide a checkpoint.")
         

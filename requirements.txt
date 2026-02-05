@@ -1,19 +1,80 @@
-streamlit>=1.28.0
-pandas>=1.5.0
-numpy>=1.21.0
-scikit-learn>=1.2.0
-tensorflow>=2.10.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
-plotly>=5.0.0
-librosa>=0.9.0
-soundfile>=0.10.0
-joblib>=1.2.0
-tqdm>=4.60.0
+# Swar_Manovigyan_ML - Python Dependencies
+# Emotion-Aware Music Therapy System
+
+# ============================================================================
+# Core Framework & Deep Learning
+# ============================================================================
+tensorflow>=2.10.0          # Deep learning framework for BiLSTM models
+numpy>=1.21.0               # Numerical computing (compatible with TensorFlow 2.20+)
+
+# ============================================================================
+# Web Application Framework
+# ============================================================================
+streamlit>=1.28.0           # Interactive web UI for emotion analysis
+
+# ============================================================================
+# Data Processing & Analysis
+# ============================================================================
+pandas>=1.5.0               # Data manipulation and CSV processing
+scikit-learn>=1.2.0         # Machine learning utilities (scalers, baselines)
+joblib>=1.2.0               # Model serialization (scalers, baseline models)
+
+# ============================================================================
+# Audio Processing
+# ============================================================================
+librosa>=0.9.0              # Audio feature extraction (mel-spectrograms, tempo, etc.)
+soundfile>=0.10.0           # Audio file I/O (WAV, MP3, FLAC, OGG)
+
+# ============================================================================
+# Visualization
+# ============================================================================
+plotly>=5.0.0               # Interactive plots (arousal-valence space)
+matplotlib>=3.5.0           # Static plotting (optional, for data analysis)
+seaborn>=0.11.0             # Statistical visualizations (optional)
+
+# ============================================================================
+# Utilities
+# ============================================================================
+tqdm>=4.60.0                # Progress bars for training and data processing
+
+# ============================================================================
+# Compatibility & Dependencies
+# ============================================================================
 # Protobuf: use 5.28–5.x for TensorFlow 2.20+ and Streamlit compatibility
+# TensorFlow 2.20+ requires protobuf>=5.28.0
+# Streamlit requires protobuf<6
 protobuf>=5.28,<6
+
+# ============================================================================
 # Testing
-pytest>=7.0.0
-# Optional: Azure OpenAI (therapeutic explanations in app)
+# ============================================================================
+pytest>=7.0.0               # Test framework (run: pytest tests/ -v)
+
+# ============================================================================
+# Optional: Azure OpenAI Integration
+# ============================================================================
+# Uncomment or install separately if using AI-powered recommendations:
+# openai>=1.0.0              # Azure OpenAI SDK for GPT-4o integration
+# python-dotenv>=1.0.0        # Environment variable management (.env files)
 openai>=1.0.0
 python-dotenv>=1.0.0
+
+# ============================================================================
+# Installation Notes
+# ============================================================================
+# 
+# Quick Install:
+#   pip install -r requirements.txt
+#
+# Windows Users:
+#   - May require Visual C++ Redistributables for TensorFlow:
+#     https://aka.ms/vs/17/release/vc_redist.x64.exe
+#
+# Optional Dependencies:
+#   - pytest-cov: For test coverage reports
+#   - azure-cognitiveservices-speech: For Azure Speech Service (future feature)
+#
+# Version Compatibility:
+#   - Python: 3.10+
+#   - TensorFlow: 2.10+ (tested with 2.20+)
+#   - Protobuf: 5.28-5.x (critical for TensorFlow 2.20+ compatibility)
