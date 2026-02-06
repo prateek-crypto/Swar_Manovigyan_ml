@@ -11,6 +11,14 @@ st.set_page_config(
     layout="wide"
 )
 
+# Load .env early (best-effort). This ensures Azure OpenAI / Speech env vars
+# are available to optional integration modules and UI status indicators.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -24,8 +32,10 @@ except Exception:
 import joblib
 import os
 import sys
+import importlib.util
 from datetime import datetime
 import random
+from typing import Optional, Any, TYPE_CHECKING
 
 # Add src to path for imports
 _app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,11 +43,14 @@ _src_dir = os.path.dirname(_app_dir)
 sys.path.insert(0, _src_dir)
 PROJECT_ROOT = os.path.dirname(_src_dir)
 
-from models.lstm_model import EmotionLSTM
 from models.baseline_models import BaselineModels
-from models.av_regressor import AVLSTMRegressor
 from utils.audio_features import extract_mel_spectrogram_sequence, extract_tabular_features_sequence
 from utils.feature_stats import load_feature_stats, apply_zscore
+try:
+    from utils.azure_speech_service import is_azure_speech_available, synthesize_text_to_wav_bytes
+except Exception:
+    is_azure_speech_available = lambda: False
+    synthesize_text_to_wav_bytes = lambda *a, **k: None
 try:
     from utils.azure_openai_service import (
         is_azure_openai_available,
@@ -55,6 +68,35 @@ except Exception:
 
 def _models_dir():
     return os.path.join(PROJECT_ROOT, "models")
+
+def _env_present(var_name: str) -> bool:
+    v = os.environ.get(var_name)
+    return bool(v and str(v).strip())
+
+
+def _speech_sdk_installed() -> bool:
+    try:
+        return importlib.util.find_spec("azure.cognitiveservices.speech") is not None
+    except Exception:
+        return False
+
+
+if TYPE_CHECKING:
+    # Only for type-checkers; these imports may fail on machines without TF runtime.
+    from models.av_regressor import AVLSTMRegressor  # pragma: no cover
+
+
+def _safe_import_av_regressor():
+    """
+    Import AVLSTMRegressor lazily so the app can start even if TensorFlow isn't available.
+    Returns (AVLSTMRegressor_class, error_str_or_None).
+    """
+    try:
+        from models.av_regressor import AVLSTMRegressor  # type: ignore
+        return AVLSTMRegressor, None
+    except Exception as e:
+        return None, str(e)
+
 
 class MusicRecommendationApp:
     """
@@ -98,10 +140,18 @@ class MusicRecommendationApp:
         self.load_models()
     
     def load_models(self):
-        """Load trained models (paths relative to project root)."""
+        """Load trained models (paths relative to project root).
+
+        Notes:
+        - TensorFlow is optional; if it fails to import/load, the app still runs with:
+          Manual mode + GPT recommendations + baseline models (if available).
+        - We avoid noisy `st.success/info` during import time; status is shown in the sidebar.
+        """
         models_dir = _models_dir()
         self.av_checkpoint_path = os.path.join(models_dir, "av_regressor.keras")
         self.scaler_lstm = None
+        self._tf_error: Optional[str] = None
+        self._av_error: Optional[str] = None
 
         try:
             # LSTM (classification)
@@ -110,11 +160,10 @@ class MusicRecommendationApp:
                 lstm_path = os.path.join(models_dir, "lstm_emotion_model.h5")
             if tf is not None and os.path.isfile(lstm_path):
                 self.lstm_model = tf.keras.models.load_model(lstm_path, compile=False)
-                st.success("LSTM (classification) loaded!")
             else:
                 self.lstm_model = None
                 if tf is None:
-                    st.info("TensorFlow not available. Running without LSTM classifier.")
+                    self._tf_error = "TensorFlow runtime not available; LSTM classifier disabled."
 
             # Scaler for LSTM and baselines (11-dim → scaled; same as training)
             scaler_path = os.path.join(models_dir, "scaler_lstm.joblib")
@@ -122,21 +171,25 @@ class MusicRecommendationApp:
                 self.scaler_lstm = joblib.load(scaler_path)
 
             # AV regressor
+            self.av_model = None
             if tf is not None and os.path.isfile(self.av_checkpoint_path):
-                self.av_model = AVLSTMRegressor(input_shape=(10, 11))
-                self.av_model.load(self.av_checkpoint_path)
-                st.success("AV LSTM regressor loaded!")
-            else:
-                self.av_model = None
-                st.info("AV regressor not found. Train with `python -m src.train_av`.")
+                AVLSTMRegressor_cls, err = _safe_import_av_regressor()
+                if AVLSTMRegressor_cls is None:
+                    self._av_error = f"Failed to import AV regressor: {err}"
+                else:
+                    try:
+                        self.av_model = AVLSTMRegressor_cls(input_shape=(10, 11))
+                        self.av_model.load(self.av_checkpoint_path)
+                    except Exception as e:
+                        self.av_model = None
+                        self._av_error = f"Failed to load AV checkpoint: {e}"
 
             # Baselines (expect 110-dim flattened sequence)
             self.baseline_models = BaselineModels()
             baseline_dir = os.path.join(models_dir, "baseline_models")
             if os.path.isdir(baseline_dir):
                 self.baseline_models.load_models(baseline_dir)
-            else:
-                st.info("Baseline models not found. Run classification pipeline to train baselines.")
+            # else: baseline models are optional
 
         except Exception as e:
             st.error(f"Error loading models: {str(e)}")
@@ -336,6 +389,16 @@ class MusicRecommendationApp:
                     ai_text = get_therapeutic_explanation(emotion_label, arousal, valence, emotion_name)
                 if ai_text:
                     st.info(f"💡 **AI insight:** {ai_text}")
+                    if is_azure_speech_available():
+                        with st.expander("🔊 Listen to AI insight (Azure Speech)", expanded=False):
+                            voice = st.text_input("Voice (optional)", value="en-US-JennyNeural", key="tts_voice")
+                            if st.button("Speak insight", key="speak_insight"):
+                                with st.spinner("Synthesizing speech..."):
+                                    wav_bytes = synthesize_text_to_wav_bytes(ai_text, voice=voice)
+                                if wav_bytes:
+                                    st.audio(wav_bytes, format="audio/wav")
+                                else:
+                                    st.warning("Speech synthesis unavailable or failed.")
         
         with col2:
             # Create emotion visualization
@@ -510,23 +573,100 @@ class MusicRecommendationApp:
     def run(self):
         """Run the Streamlit app"""
         st.title("🎵 Emotion-Aware Music Recommendation System")
+        st.caption("Continuous arousal–valence emotion prediction with AI-powered therapeutic music suggestions.")
         st.markdown("---")
         
         # Sidebar
         st.sidebar.title("🎛️ Controls")
+
+        with st.sidebar.expander("System status", expanded=False):
+            st.write(f"**Azure OpenAI:** {'Enabled' if is_azure_openai_available() else 'Disabled'}")
+            st.write(f"**Azure Speech (TTS):** {'Enabled' if is_azure_speech_available() else 'Disabled'}")
+            st.write(f"**LSTM classifier:** {'Loaded' if getattr(self, 'lstm_model', None) is not None else 'Not loaded'}")
+            st.write(f"**AV regressor:** {'Loaded' if getattr(self, 'av_model', None) is not None else 'Not loaded'}")
+            if getattr(self, "_tf_error", None):
+                st.caption(f"TensorFlow: {self._tf_error}")
+            if getattr(self, "_av_error", None):
+                st.caption(f"AV model: {self._av_error}")
+
+        with st.sidebar.expander("Dependencies & configuration", expanded=False):
+            st.markdown("**Environment (.env)**")
+            st.write(f"- **AZURE_OPENAI_ENDPOINT**: {'✅' if _env_present('AZURE_OPENAI_ENDPOINT') else '❌'}")
+            st.write(f"- **AZURE_OPENAI_API_KEY**: {'✅' if _env_present('AZURE_OPENAI_API_KEY') else '❌'}")
+            st.write(f"- **AZURE_OPENAI_DEPLOYMENT**: {'✅' if _env_present('AZURE_OPENAI_DEPLOYMENT') else '❌'}")
+            st.write(f"- **AZURE_SPEECH_KEY**: {'✅' if _env_present('AZURE_SPEECH_KEY') else '❌'}")
+            st.write(f"- **AZURE_SPEECH_REGION**: {'✅' if _env_present('AZURE_SPEECH_REGION') else '❌'}")
+
+            st.markdown("**Python packages**")
+            st.write(f"- **Azure Speech SDK** (`azure-cognitiveservices-speech`): {'✅' if _speech_sdk_installed() else '❌'}")
+            st.write(f"- **TensorFlow**: {'✅' if tf is not None else '❌'}")
+
+            st.markdown("**Model files**")
+            models_dir = _models_dir()
+            lstm_k = os.path.join(models_dir, "lstm_emotion_model.keras")
+            lstm_h = os.path.join(models_dir, "lstm_emotion_model.h5")
+            st.write(f"- **LSTM classifier checkpoint**: {'✅' if (os.path.isfile(lstm_k) or os.path.isfile(lstm_h)) else '❌'}")
+            st.write(f"  - expected: `{os.path.basename(lstm_k)}` or `{os.path.basename(lstm_h)}` in `models/`")
+
+        with st.sidebar.expander("Models & training helper", expanded=False):
+            models_dir = _models_dir()
+            av_tab = os.path.join(models_dir, "av_regressor.keras")
+            av_mel = os.path.join(models_dir, "av_regressor_mel.keras")
+            stats_tab = os.path.join(models_dir, "feature_stats_av.json")
+            stats_mel = os.path.join(models_dir, "mel_stats_av.json")
+            scaler = os.path.join(models_dir, "scaler_lstm.joblib")
+            baseline_dir = os.path.join(models_dir, "baseline_models")
+
+            st.markdown("**Detected artifacts**")
+            st.write(f"- AV regressor (tabular): {'✅' if os.path.isfile(av_tab) else '❌'}  (`models/av_regressor.keras`)")
+            st.write(f"- AV regressor (mel): {'✅' if os.path.isfile(av_mel) else '❌'}  (`models/av_regressor_mel.keras`)")
+            st.write(f"- Tabular feature stats: {'✅' if os.path.isfile(stats_tab) else '❌'}  (`models/feature_stats_av.json`)")
+            st.write(f"- Mel stats: {'✅' if os.path.isfile(stats_mel) else '❌'}  (`models/mel_stats_av.json`)")
+            st.write(f"- LSTM scaler: {'✅' if os.path.isfile(scaler) else '❌'}  (`models/scaler_lstm.joblib`)")
+            st.write(f"- Baselines folder: {'✅' if os.path.isdir(baseline_dir) else '❌'}  (`models/baseline_models/`)")
+
+            st.markdown("**How to get missing models**")
+            st.code(
+                "## 1) Create emotion labels (Spotify CSV)\n"
+                "python -m src.utils.data_analysis\n\n"
+                "## 2) Train A/V regressor (tabular)\n"
+                "python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 20 --checkpoint models/av_regressor.keras\n\n"
+                "## 3) (Optional) Train mel A/V regressor (frame-level)\n"
+                "python -m src.train_av_mel --audio_dir data/audio --csv data/processed/mel_training_labels.csv --epochs 20 --checkpoint models/av_regressor_mel.keras\n\n"
+                "## 4) (Optional) Train classifier + baselines\n"
+                "python -m src.models.training_pipeline\n",
+                language="bash",
+            )
+
+            st.markdown("**Expected filenames**")
+            st.write("- LSTM classifier: `models/lstm_emotion_model.keras` (or `.h5`)")
+            st.write("- Baselines: `models/baseline_models/*.joblib`")
         
         input_method = st.sidebar.radio(
             "Choose Input Method:",
             ["Manual Emotion Selection", "Audio Features Input", "Audio Upload (A/V)"]
         )
+
+        st.sidebar.markdown("---")
+        st.sidebar.caption("Tip: Use the tabs after prediction to explore results, recommendations, and model outputs.")
+
+        def _render_tabs(emotion_label: int, confidence: float, arousal: float | None, valence: float | None, sequence_11: np.ndarray | None = None):
+            tab_results, tab_recs, tab_models = st.tabs(["Results", "Recommendations", "Models"])
+            with tab_results:
+                self.display_emotion_results(emotion_label, confidence, arousal, valence)
+            with tab_recs:
+                self.display_music_recommendations(emotion_label, arousal, valence)
+            with tab_models:
+                if sequence_11 is not None and getattr(self.baseline_models, 'models', None):
+                    self.display_model_comparison(sequence_11)
+                else:
+                    st.info("Model comparison is available after running the Feature Input mode (and/or training baselines).")
         
         # Main content
         if input_method == "Manual Emotion Selection":
             emotion_label, arousal, valence = self.create_emotion_input_form()
             
-            # Display results
-            self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-            self.display_music_recommendations(emotion_label, arousal, valence)
+            _render_tabs(emotion_label, 1.0, arousal, valence)
         
         elif input_method == "Audio Features Input":
             features = self.create_audio_features_form()
@@ -538,9 +678,7 @@ class MusicRecommendationApp:
                         lstm_emotion, lstm_conf, lstm_probs = self.predict_emotion_lstm(sequence_11)
                         if lstm_emotion is not None:
                             arousal, valence = self.estimate_av_from_features(features)
-                            self.display_emotion_results(lstm_emotion, lstm_conf, arousal, valence)
-                            self.display_music_recommendations(lstm_emotion, arousal, valence)
-                            self.display_model_comparison(sequence_11)
+                            _render_tabs(lstm_emotion, lstm_conf, arousal, valence, sequence_11=sequence_11)
                         else:
                             st.error("Unable to make prediction with LSTM.")
                     else:
@@ -548,10 +686,7 @@ class MusicRecommendationApp:
                         arousal_bin = 1 if arousal > 0.5 else 0
                         valence_bin = 1 if valence > 0.5 else 0
                         emotion_label = arousal_bin * 2 + valence_bin
-                        self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-                        self.display_music_recommendations(emotion_label, arousal, valence)
-                        if getattr(self.baseline_models, 'models', None):
-                            self.display_model_comparison(sequence_11)
+                        _render_tabs(emotion_label, 1.0, arousal, valence, sequence_11=sequence_11)
         
         else:  # Audio Upload (A/V)
             st.subheader("🎙️ Upload Audio (wav/mp3)")
@@ -564,9 +699,13 @@ class MusicRecommendationApp:
                 st.audio(audio_bytes)
                 if st.button("🎯 Predict Arousal–Valence", type="primary"):
                     with st.spinner("Extracting features and predicting..."):
+                        # Lazily (re)load the checkpoint if needed
                         if ckpt and os.path.isfile(ckpt) and tf is not None and (self.av_model is None or getattr(self, "_last_ckpt", None) != ckpt):
                             try:
-                                self.av_model = AVLSTMRegressor(input_shape=(10, 11))
+                                AVLSTMRegressor_cls, err = _safe_import_av_regressor()
+                                if AVLSTMRegressor_cls is None:
+                                    raise RuntimeError(err or "AV regressor import failed")
+                                self.av_model = AVLSTMRegressor_cls(input_shape=(10, 11))
                                 self.av_model.load(ckpt)
                                 self.av_checkpoint_path = ckpt
                                 self._last_ckpt = ckpt
@@ -579,8 +718,7 @@ class MusicRecommendationApp:
                             arousal_binary = 1 if arousal > 0.5 else 0
                             valence_binary = 1 if valence > 0.5 else 0
                             emotion_label = arousal_binary * 2 + valence_binary
-                            self.display_emotion_results(emotion_label, 1.0, arousal, valence)
-                            self.display_music_recommendations(emotion_label, arousal, valence)
+                            _render_tabs(emotion_label, 1.0, arousal, valence)
                         else:
                             st.warning("AV model not available. Please train or provide a checkpoint.")
         

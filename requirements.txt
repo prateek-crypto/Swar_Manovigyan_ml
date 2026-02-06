@@ -53,11 +53,14 @@ pytest>=7.0.0               # Test framework (run: pytest tests/ -v)
 # ============================================================================
 # Optional: Azure OpenAI Integration
 # ============================================================================
-# Uncomment or install separately if using AI-powered recommendations:
-# openai>=1.0.0              # Azure OpenAI SDK for GPT-4o integration
-# python-dotenv>=1.0.0        # Environment variable management (.env files)
 openai>=1.0.0
 python-dotenv>=1.0.0
+
+# ============================================================================
+# Optional: Azure Speech (Text-to-Speech)
+# ============================================================================
+# Required only if you want the Streamlit app to read AI insights aloud.
+azure-cognitiveservices-speech>=1.37.0
 
 # ============================================================================
 # Installation Notes
@@ -72,7 +75,7 @@ python-dotenv>=1.0.0
 #
 # Optional Dependencies:
 #   - pytest-cov: For test coverage reports
-#   - azure-cognitiveservices-speech: For Azure Speech Service (future feature)
+#   - azure-cognitiveservices-speech: For Azure Speech Service (TTS)
 #
 # Version Compatibility:
 #   - Python: 3.10+
