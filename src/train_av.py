@@ -6,13 +6,28 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
+import random
 import numpy as np
 import pandas as pd
 from typing import Tuple, List, Dict, Any
 
-from src.utils.data_analysis import DataPreprocessor
 from src.models.av_regressor import AVLSTMRegressor
+
+logger = logging.getLogger(__name__)
+
+
+def _set_global_seeds(seed: int = 42) -> None:
+    """Set Python, NumPy, and TensorFlow global seeds for full reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    try:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    except Exception:
+        pass
 
 # Canonical feature column order (must match inference and app)
 FEATURE_COLUMNS: List[str] = [
@@ -100,15 +115,22 @@ def main():
 
     args = parser.parse_args()
 
+    # Set global seeds for reproducibility
+    _set_global_seeds(42)
+
     checkpoint_dir = os.path.dirname(args.checkpoint)
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
 
     df = pd.read_csv(args.csv)
 
-    # Ensure arousal / enhanced_valence exist; if not, compute via EmotionLabeler in separate steps
+    # Auto-generate emotion labels if missing columns
     if 'arousal' not in df.columns or 'enhanced_valence' not in df.columns:
-        raise ValueError('CSV must contain columns arousal and enhanced_valence. Generate with utils.data_analysis.EmotionLabeler.')
+        logger.info("CSV missing arousal/enhanced_valence columns. Running EmotionLabeler automatically...")
+        from src.utils.data_analysis import EmotionLabeler
+        labeler = EmotionLabeler()
+        df = labeler.create_emotion_labels(df)
+        logger.info("Emotion labels created successfully.")
 
     X, y, feature_stats = build_sequences_for_regression(
         df,

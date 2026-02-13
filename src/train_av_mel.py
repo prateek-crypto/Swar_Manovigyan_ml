@@ -13,16 +13,32 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
+import random
 import numpy as np
 import pandas as pd
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict
 from pathlib import Path
 import librosa
 import soundfile as sf
 from tqdm import tqdm
 
 from src.models.av_regressor import AVLSTMRegressor
+
+logger = logging.getLogger(__name__)
+
+
+def _set_global_seeds(seed: int = 42) -> None:
+    """Set Python, NumPy, and TensorFlow global seeds for full reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    try:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    except Exception:
+        pass
 
 
 def extract_mel_spectrogram_from_file(
@@ -163,6 +179,69 @@ def load_audio_files_and_labels(
     return mel_spectrograms, labels_array
 
 
+def load_precomputed_mel_and_labels(
+    mel_dir: str,
+    csv_path: str,
+    filename_column: str = "filename",
+) -> Tuple[List[np.ndarray], np.ndarray]:
+    """
+    Load precomputed mel-spectrogram .npy files from *mel_dir* and match
+    them against a CSV that provides arousal/enhanced_valence labels.
+
+    Each .npy file should contain a (T, 128) array saved via ``np.save()``.
+    The stem of the filename (without extension) is matched against the
+    *filename_column* in the CSV.
+
+    Returns:
+        mel_spectrograms: List of (T_i, 128) arrays
+        labels: (N, 2) float32 array with [arousal, enhanced_valence]
+    """
+    df = pd.read_csv(csv_path)
+    required_cols = [filename_column, "arousal", "enhanced_valence"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"CSV missing required columns: {missing}")
+
+    # Build lookup: stem -> (arousal, enhanced_valence)
+    label_lookup: Dict[str, Tuple[float, float]] = {}
+    for _, row in df.iterrows():
+        stem = str(row[filename_column]).rsplit(".", 1)[0]  # strip extension if any
+        label_lookup[stem] = (float(row["arousal"]), float(row["enhanced_valence"]))
+
+    mel_dir_path = Path(mel_dir)
+    npy_files = sorted(mel_dir_path.glob("*.npy"))
+    if not npy_files:
+        raise ValueError(f"No .npy files found in {mel_dir}")
+
+    mel_spectrograms: List[np.ndarray] = []
+    labels: list = []
+
+    print(f"Loading precomputed mel-spectrograms from {mel_dir}...")
+    for npy_path in tqdm(npy_files, desc="Loading .npy mel files"):
+        stem = npy_path.stem
+        if stem not in label_lookup:
+            logger.debug("No label for %s, skipping.", stem)
+            continue
+        try:
+            mel = np.load(str(npy_path)).astype(np.float32)
+            if mel.ndim != 2:
+                logger.warning("Unexpected shape %s for %s, skipping.", mel.shape, npy_path)
+                continue
+            mel_spectrograms.append(mel)
+            labels.append(list(label_lookup[stem]))
+        except Exception as e:
+            logger.warning("Failed to load %s: %s, skipping.", npy_path, e)
+
+    if not mel_spectrograms:
+        raise ValueError("No valid mel-spectrogram .npy files could be matched to CSV labels.")
+
+    labels_array = np.array(labels, dtype=np.float32)
+    np.clip(labels_array, 0.0, 1.0, out=labels_array)
+
+    print(f"Loaded {len(mel_spectrograms)} precomputed mel-spectrograms.")
+    return mel_spectrograms, labels_array
+
+
 def build_sequences_from_mel_files(
     mel_spectrograms: List[np.ndarray],
     labels: np.ndarray,
@@ -247,6 +326,9 @@ def main():
     if args.audio_dir is None and args.mel_dir is None:
         raise ValueError("Must provide either --audio_dir or --mel_dir")
 
+    # Set global seeds for reproducibility
+    _set_global_seeds(42)
+
     checkpoint_dir = os.path.dirname(args.checkpoint)
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -260,7 +342,11 @@ def main():
         )
     else:
         # Load precomputed mel-spectrograms from .npy files
-        raise NotImplementedError("Precomputed mel_dir loading not yet implemented. Use --audio_dir.")
+        mel_spectrograms, labels = load_precomputed_mel_and_labels(
+            args.mel_dir,
+            args.csv,
+            filename_column=args.filename_column,
+        )
 
     # Build frame-level sequences
     X, y = build_sequences_from_mel_files(

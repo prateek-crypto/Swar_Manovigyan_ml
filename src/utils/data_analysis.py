@@ -7,8 +7,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -90,7 +89,6 @@ class DataPreprocessor:
     
     def __init__(self):
         self.scaler = StandardScaler()
-        self.label_encoder = LabelEncoder()
         
     def prepare_features(self, df, sequence_length=10):
         """

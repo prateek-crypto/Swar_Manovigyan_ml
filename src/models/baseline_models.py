@@ -9,11 +9,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.model_selection import cross_val_score
+from sklearn.metrics import accuracy_score
 import joblib
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 class BaselineModels:
     """

@@ -2,7 +2,12 @@
 Streamlit Frontend for Emotion-Aware Music Recommendation System
 """
 
+import logging
 import streamlit as st
+
+# Configure logging early
+logging.basicConfig(level=logging.INFO, format="%(name)s | %(levelname)s | %(message)s")
+logger = logging.getLogger(__name__)
 
 # Set page config FIRST - this must be the first Streamlit command
 st.set_page_config(
@@ -16,39 +21,46 @@ st.set_page_config(
 try:
     from dotenv import load_dotenv  # type: ignore
     load_dotenv()
-except Exception:
-    pass
+except ImportError:
+    logger.debug("python-dotenv not installed; skipping .env loading.")
 
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
 # TensorFlow is optional; the app should work with baseline models only
 try:
     import tensorflow as tf  # type: ignore
-except Exception:
+except Exception as _tf_import_err:
     tf = None  # fallback to baseline-only mode
+    logger.warning("TensorFlow import failed: %s", _tf_import_err)
+
 import joblib
 import os
 import sys
 import importlib.util
-from datetime import datetime
-import random
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
-# Add src to path for imports
+# Add both src/ and project root to sys.path so that:
+#   - `from models.xxx` / `from utils.xxx` work (via _src_dir)
+#   - `from src.xxx` works (via PROJECT_ROOT), needed by lazy imports
+#     of modules like train_av_mel that use `from src.models...` internally
 _app_dir = os.path.dirname(os.path.abspath(__file__))
 _src_dir = os.path.dirname(_app_dir)
-sys.path.insert(0, _src_dir)
 PROJECT_ROOT = os.path.dirname(_src_dir)
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from models.baseline_models import BaselineModels
 from utils.audio_features import extract_mel_spectrogram_sequence, extract_tabular_features_sequence
 from utils.feature_stats import load_feature_stats, apply_zscore
+
 try:
     from utils.azure_speech_service import is_azure_speech_available, synthesize_text_to_wav_bytes
-except Exception:
+except Exception as _e:
+    logger.warning("Azure Speech import failed: %s", _e)
     is_azure_speech_available = lambda: False
     synthesize_text_to_wav_bytes = lambda *a, **k: None
 try:
@@ -59,7 +71,8 @@ try:
         get_ai_music_styles,
         get_ai_sample_tracks,
     )
-except Exception:
+except Exception as _e:
+    logger.warning("Azure OpenAI import failed: %s", _e)
     is_azure_openai_available = lambda: False
     get_therapeutic_explanation = lambda *a, **k: None
     get_recommendation_blurb = lambda *a, **k: None
@@ -95,7 +108,12 @@ def _safe_import_av_regressor():
         from models.av_regressor import AVLSTMRegressor  # type: ignore
         return AVLSTMRegressor, None
     except Exception as e:
+        logger.warning("AV regressor import failed: %s", e)
         return None, str(e)
+
+
+# Maximum mel sequences to average during inference
+_MAX_MEL_SEQ_AVG = 10
 
 
 class MusicRecommendationApp:
@@ -155,13 +173,18 @@ class MusicRecommendationApp:
 
         try:
             # LSTM (classification)
+            self.lstm_model = None
             lstm_path = os.path.join(models_dir, "lstm_emotion_model.keras")
             if not os.path.isfile(lstm_path):
                 lstm_path = os.path.join(models_dir, "lstm_emotion_model.h5")
             if tf is not None and os.path.isfile(lstm_path):
-                self.lstm_model = tf.keras.models.load_model(lstm_path, compile=False)
+                try:
+                    self.lstm_model = tf.keras.models.load_model(lstm_path, compile=False)
+                    logger.info("Loaded LSTM classifier from %s", lstm_path)
+                except Exception as e:
+                    logger.warning("LSTM load failed: %s", e)
+                    self.lstm_model = None
             else:
-                self.lstm_model = None
                 if tf is None:
                     self._tf_error = "TensorFlow runtime not available; LSTM classifier disabled."
 
@@ -170,7 +193,7 @@ class MusicRecommendationApp:
             if os.path.isfile(scaler_path):
                 self.scaler_lstm = joblib.load(scaler_path)
 
-            # AV regressor
+            # AV regressor — detect shape from loaded model (no dummy guess)
             self.av_model = None
             if tf is not None and os.path.isfile(self.av_checkpoint_path):
                 AVLSTMRegressor_cls, err = _safe_import_av_regressor()
@@ -178,21 +201,28 @@ class MusicRecommendationApp:
                     self._av_error = f"Failed to import AV regressor: {err}"
                 else:
                     try:
-                        self.av_model = AVLSTMRegressor_cls(input_shape=(10, 11))
-                        self.av_model.load(self.av_checkpoint_path)
+                        # Load raw Keras model first to detect input shape
+                        from keras import models as keras_models
+                        raw = keras_models.load_model(self.av_checkpoint_path, compile=False)
+                        real_shape = raw.input_shape[1:]  # (T, F)
+                        av = AVLSTMRegressor_cls(input_shape=real_shape)
+                        av.model = raw
+                        self.av_model = av
+                        logger.info("Loaded AV regressor (shape %s) from %s", real_shape, self.av_checkpoint_path)
                     except Exception as e:
                         self.av_model = None
                         self._av_error = f"Failed to load AV checkpoint: {e}"
+                        logger.warning("AV regressor load failed: %s", e)
 
             # Baselines (expect 110-dim flattened sequence)
             self.baseline_models = BaselineModels()
             baseline_dir = os.path.join(models_dir, "baseline_models")
             if os.path.isdir(baseline_dir):
                 self.baseline_models.load_models(baseline_dir)
-            # else: baseline models are optional
 
         except Exception as e:
             st.error(f"Error loading models: {str(e)}")
+            logger.exception("Critical model loading error")
             self.lstm_model = None
             self.baseline_models = None
             self.av_model = None
@@ -232,11 +262,12 @@ class MusicRecommendationApp:
 
     def estimate_av_from_features(self, features: np.ndarray) -> tuple[float, float]:
         """Estimate arousal/enhanced_valence from slider features (same logic as preprocessing)."""
+        from utils.audio_features import LOUDNESS_MIN, LOUDNESS_MAX, TEMPO_MIN, TEMPO_MAX
         energy = float(features[0, 2])
-        loudness = float(features[0, 5])  # [-60, 0]
-        tempo = float(features[0, 7])     # [50, 200]
-        loudness_norm = (loudness - (-60.0)) / (0.0 - (-60.0) + 1e-8)
-        tempo_norm = (tempo - 50.0) / (200.0 - 50.0 + 1e-8)
+        loudness = float(features[0, 5])
+        tempo = float(features[0, 7])
+        loudness_norm = (loudness - LOUDNESS_MIN) / (LOUDNESS_MAX - LOUDNESS_MIN + 1e-8)
+        tempo_norm = (tempo - TEMPO_MIN) / (TEMPO_MAX - TEMPO_MIN + 1e-8)
         arousal = 0.4 * energy + 0.3 * loudness_norm + 0.3 * tempo_norm
         valence = float(features[0, 8])
         danceability = float(features[0, 1])
@@ -250,7 +281,6 @@ class MusicRecommendationApp:
         Order: acousticness, danceability, energy, instrumentalness, liveness, loudness, speechiness, tempo, valence, arousal, enhanced_valence.
         """
         arousal, enhanced_valence = self.estimate_av_from_features(features_9)
-        # Single 11-dim vector
         vec = np.array([
             float(features_9[0, 0]), float(features_9[0, 1]), float(features_9[0, 2]),
             float(features_9[0, 3]), float(features_9[0, 4]), float(features_9[0, 5]),
@@ -279,7 +309,6 @@ class MusicRecommendationApp:
             tempo = st.slider("Tempo (BPM)", 50.0, 200.0, 120.0, 1.0)
             valence = st.slider("Valence", 0.0, 1.0, 0.5, 0.01)
         
-        # Create feature vector
         features = np.array([[
             acousticness, danceability, energy, instrumentalness,
             liveness, loudness, speechiness, tempo, valence
@@ -295,17 +324,18 @@ class MusicRecommendationApp:
         if self.lstm_model is None:
             return None, None, None
         try:
-            X = sequence_11  # (1, 10, 11)
+            X = sequence_11  # (1, T, 11)
             if self.scaler_lstm is not None:
-                # Scaler expects (n_samples, n_features); reshape (1,10,11) -> (10,11), transform, back
+                orig_shape = X.shape  # preserve (1, T, 11) for any T
                 flat = X.reshape(-1, 11)
                 flat = self.scaler_lstm.transform(flat)
-                X = flat.reshape(1, 10, 11).astype(np.float32)
+                X = flat.reshape(orig_shape).astype(np.float32)
             predictions = self.lstm_model.predict(X)
             emotion_label = int(np.argmax(predictions[0]))
             confidence = float(np.max(predictions[0]))
             return emotion_label, confidence, predictions[0]
         except Exception as e:
+            logger.warning("LSTM prediction error: %s", e)
             st.error(f"Error in LSTM prediction: {str(e)}")
             return None, None, None
     
@@ -323,24 +353,31 @@ class MusicRecommendationApp:
             feature_stats = load_feature_stats(ckpt) if expected_F == 11 else None
 
             if expected_F == 128:
-                # Mel-spectrogram path: extract full mel, then build frame-level sequence
+                # Mel-spectrogram path with multi-sequence averaging
                 from src.train_av_mel import build_frame_sequences_from_mel
-                mel, _, _ = extract_mel_spectrogram_sequence(audio_bytes, target_frames=None)  # Get full length
-                # Build sequence using sliding window (same as training)
+                mel, _, _ = extract_mel_spectrogram_sequence(audio_bytes, target_frames=None)
                 sequences = build_frame_sequences_from_mel(mel, sequence_length=expected_T or 10, stride=1)
-                # Use the first sequence (or average multiple sequences for robustness)
-                X = sequences[0:1]  # (1, T, 128) - use first sequence
+
+                n_seqs = min(len(sequences), _MAX_MEL_SEQ_AVG)
+                if n_seqs == 0:
+                    raise ValueError("No sequences could be built from the audio.")
+                indices = np.linspace(0, len(sequences) - 1, n_seqs, dtype=int)
+                X = sequences[indices]
+                preds = self.av_model.predict(X)
+                av = preds.mean(axis=0)
+                logger.info("App mel inference: averaged %d/%d sequences", n_seqs, len(sequences))
             elif expected_F == 11:
                 seq, _ = extract_tabular_features_sequence(audio_bytes, sequence_length=expected_T or 10)
                 if feature_stats is not None:
                     seq = apply_zscore(seq, feature_stats)
                 X = seq[None, ...]
+                av = self.av_model.predict(X)[0]
             else:
                 raise ValueError(f"Unsupported model feature dim: expected_F={expected_F}")
 
-            av = self.av_model.predict(X)[0]
             return float(av[0]), float(av[1])
         except Exception as e:
+            logger.warning("AV prediction error: %s", e)
             st.error(f"Error in AV prediction: {str(e)}")
             return None
     
@@ -352,7 +389,7 @@ class MusicRecommendationApp:
         if self.baseline_models is None or model_name not in self.baseline_models.models:
             return None, None, None
         try:
-            X = sequence_11  # (1, 10, 11)
+            X = sequence_11
             if self.scaler_lstm is not None:
                 flat = X.reshape(-1, 11)
                 flat = self.scaler_lstm.transform(flat)
@@ -370,6 +407,7 @@ class MusicRecommendationApp:
                 probabilities = None
             return emotion_label, confidence, probabilities
         except Exception as e:
+            logger.warning("Baseline %s prediction error: %s", model_name, e)
             st.error(f"Error in {model_name} prediction: {str(e)}")
             return None, None, None
     
@@ -401,10 +439,7 @@ class MusicRecommendationApp:
                                     st.warning("Speech synthesis unavailable or failed.")
         
         with col2:
-            # Create emotion visualization
             fig = go.Figure()
-            
-            # Add arousal-valence point
             if arousal is not None and valence is not None:
                 fig.add_trace(go.Scatter(
                     x=[arousal], y=[valence],
@@ -412,13 +447,10 @@ class MusicRecommendationApp:
                     marker=dict(size=20, color='red', symbol='star'),
                     name='Your Mood'
                 ))
-            
-            # Add quadrant labels
             fig.add_annotation(x=0.25, y=0.25, text="Sad\nDepressed", showarrow=False, font=dict(size=10))
             fig.add_annotation(x=0.75, y=0.25, text="Calm\nPeaceful", showarrow=False, font=dict(size=10))
             fig.add_annotation(x=0.25, y=0.75, text="Angry\nStressed", showarrow=False, font=dict(size=10))
             fig.add_annotation(x=0.75, y=0.75, text="Happy\nExcited", showarrow=False, font=dict(size=10))
-            
             fig.update_layout(
                 title="Arousal-Valence Space",
                 xaxis_title="Arousal (Energy)",
@@ -428,7 +460,6 @@ class MusicRecommendationApp:
                 width=300,
                 height=300
             )
-            
             st.plotly_chart(fig, use_container_width=True)
     
     def display_music_recommendations(self, emotion_label: int, arousal: float | None = None, valence: float | None = None):
@@ -466,10 +497,11 @@ class MusicRecommendationApp:
         for i, rec in enumerate(recommendations, 1):
             st.markdown(f"{i}. {rec}")
         
-        # Create sample playlist (AI first, fallback to demo tracks)
+        # Create sample playlist (AI first, fallback to curated tracks)
         st.subheader("🎧 Sample Playlist")
 
         sample_tracks = None
+        is_ai_generated = False
         if is_azure_openai_available():
             with st.spinner("Asking AI for example tracks..."):
                 ai_tracks = get_ai_sample_tracks(
@@ -479,7 +511,7 @@ class MusicRecommendationApp:
                     emotion_name,
                 )
             if ai_tracks:
-                # Ensure each track has an id for Streamlit buttons
+                is_ai_generated = True
                 sample_tracks = []
                 for idx, t in enumerate(ai_tracks, start=1):
                     track_id = t.get("id") or f"ai_{emotion_label}_{idx}"
@@ -487,28 +519,27 @@ class MusicRecommendationApp:
                         {
                             "title": t.get("title", f"Track {idx}"),
                             "artist": t.get("artist", "Unknown Artist"),
-                            "duration": t.get("duration", "3:00"),
+                            "duration": t.get("duration", "3:30"),
                             "id": track_id,
                         }
                     )
 
-        # Fallback to demo playlist if AI is unavailable or failed
+        # Fallback to curated playlist if AI is unavailable or failed
         if sample_tracks is None:
             sample_tracks = self.generate_sample_tracks(emotion_label)
-        
+
+        if is_ai_generated:
+            st.caption("*Tracks suggested by AI — search for them on your preferred streaming platform.*")
+
         for track in sample_tracks:
-            col1, col2, col3 = st.columns([3, 1, 1])
+            col1, col2 = st.columns([3, 1])
             with col1:
-                st.write(f"🎵 {track['title']} - {track['artist']}")
+                st.write(f"🎵 {track['title']} — {track['artist']}")
             with col2:
                 st.write(f"⏱️ {track['duration']}")
-            with col3:
-                if st.button("▶️", key=f"play_{track['id']}"):
-                    st.success("Playing... (Demo)")
     
     def generate_sample_tracks(self, emotion_label):
-        """Generate sample tracks based on emotion"""
-        # This is a demo - in a real app, you'd query a music database
+        """Curated sample tracks based on emotion quadrant."""
         sample_data = {
             0: [  # Sad/Depressed
                 {"title": "Hurt", "artist": "Johnny Cash", "duration": "3:38", "id": "sad1"},
@@ -518,7 +549,7 @@ class MusicRecommendationApp:
             1: [  # Calm/Peaceful
                 {"title": "Weightless", "artist": "Marconi Union", "duration": "8:59", "id": "calm1"},
                 {"title": "Clair de Lune", "artist": "Claude Debussy", "duration": "4:56", "id": "calm2"},
-                {"title": "Meditation", "artist": "Massive Attack", "duration": "5:20", "id": "calm3"}
+                {"title": "Teardrop", "artist": "Massive Attack", "duration": "5:30", "id": "calm3"}
             ],
             2: [  # Angry/Stressed
                 {"title": "Break Stuff", "artist": "Limp Bizkit", "duration": "2:46", "id": "angry1"},
@@ -531,7 +562,6 @@ class MusicRecommendationApp:
                 {"title": "Good Vibrations", "artist": "The Beach Boys", "duration": "3:37", "id": "happy3"}
             ]
         }
-        
         return sample_data.get(emotion_label, [])
     
     def display_model_comparison(self, sequence_11: np.ndarray):
@@ -555,7 +585,6 @@ class MusicRecommendationApp:
                             'confidence': conf
                         }
         
-        # Display comparison table
         if predictions:
             comparison_data = []
             for model, result in predictions.items():
@@ -564,7 +593,6 @@ class MusicRecommendationApp:
                     'Predicted Emotion': result['emotion'],
                     'Confidence': f"{result['confidence']:.2%}"
                 })
-            
             df = pd.DataFrame(comparison_data)
             st.dataframe(df, use_container_width=True)
         else:
@@ -633,7 +661,9 @@ class MusicRecommendationApp:
                 "python -m src.train_av --csv data/processed/spotify_features_with_emotions.csv --epochs 20 --checkpoint models/av_regressor.keras\n\n"
                 "## 3) (Optional) Train mel A/V regressor (frame-level)\n"
                 "python -m src.train_av_mel --audio_dir data/audio --csv data/processed/mel_training_labels.csv --epochs 20 --checkpoint models/av_regressor_mel.keras\n\n"
-                "## 4) (Optional) Train classifier + baselines\n"
+                "## 4a) (Recommended) Train LSTM classifier only\n"
+                "python -m src.models.train_lstm_only --epochs 30 --batch_size 32 --sequence_length 10\n\n"
+                "## 4b) (Full) Train classifier + CNN + baselines\n"
                 "python -m src.models.training_pipeline\n",
                 language="bash",
             )
@@ -665,7 +695,6 @@ class MusicRecommendationApp:
         # Main content
         if input_method == "Manual Emotion Selection":
             emotion_label, arousal, valence = self.create_emotion_input_form()
-            
             _render_tabs(emotion_label, 1.0, arousal, valence)
         
         elif input_method == "Audio Features Input":
@@ -699,18 +728,23 @@ class MusicRecommendationApp:
                 st.audio(audio_bytes)
                 if st.button("🎯 Predict Arousal–Valence", type="primary"):
                     with st.spinner("Extracting features and predicting..."):
-                        # Lazily (re)load the checkpoint if needed
+                        # Lazily (re)load the checkpoint if needed — detect real shape from model
                         if ckpt and os.path.isfile(ckpt) and tf is not None and (self.av_model is None or getattr(self, "_last_ckpt", None) != ckpt):
                             try:
                                 AVLSTMRegressor_cls, err = _safe_import_av_regressor()
                                 if AVLSTMRegressor_cls is None:
                                     raise RuntimeError(err or "AV regressor import failed")
-                                self.av_model = AVLSTMRegressor_cls(input_shape=(10, 11))
-                                self.av_model.load(ckpt)
+                                from keras import models as keras_models
+                                raw = keras_models.load_model(ckpt, compile=False)
+                                real_shape = raw.input_shape[1:]  # (T, F)
+                                av = AVLSTMRegressor_cls(input_shape=real_shape)
+                                av.model = raw
+                                self.av_model = av
                                 self.av_checkpoint_path = ckpt
                                 self._last_ckpt = ckpt
                                 st.success("Loaded AV checkpoint.")
                             except Exception as e:
+                                logger.warning("AV checkpoint reload failed: %s", e)
                                 st.error(f"Failed to load checkpoint: {e}")
                         av = self.predict_av_from_audio(audio_bytes, checkpoint_path=ckpt or None)
                         if av is not None:

@@ -4,19 +4,36 @@ Orchestrates the training of LSTM and baseline models
 """
 
 import joblib
+import logging
 import numpy as np
+import os
+import json
+import random
+from datetime import datetime
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
-import os
-import json
-from datetime import datetime
+from sklearn.metrics import confusion_matrix
 
 from .lstm_model import EmotionLSTM, EmotionCNN1D
 from .baseline_models import BaselineModels
-from ..utils.data_analysis import DataPreprocessor
+from ..utils.data_analysis import DataPreprocessor, EmotionLabeler
+
+logger = logging.getLogger(__name__)
+
+
+def _set_global_seeds(seed: int = 42) -> None:
+    """Set Python, NumPy, and TensorFlow global seeds for full reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    try:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    except Exception:
+        pass
 
 class TrainingPipeline:
     """
@@ -33,12 +50,23 @@ class TrainingPipeline:
         
     def load_and_prepare_data(self, sequence_length=10, test_size=0.2, val_size=0.2):
         """Load and prepare data for training"""
+        # Set global seeds for reproducibility
+        _set_global_seeds(42)
+
         print("Loading and preparing data...")
         
         # Load data
         df = pd.read_csv(self.data_path)
         print(f"Loaded {len(df)} samples")
         
+        # Auto-generate emotion labels if CSV is missing required columns
+        required = {"emotion_label", "arousal", "enhanced_valence"}
+        if not required.issubset(set(df.columns)):
+            logger.info("CSV missing %s columns. Running EmotionLabeler...", required - set(df.columns))
+            labeler = EmotionLabeler()
+            df = labeler.create_emotion_labels(df)
+            logger.info("Emotion labels created successfully.")
+
         # Prepare features
         X_sequences, y_sequences = self.preprocessor.prepare_features(df, sequence_length)
         print(f"Created {len(X_sequences)} sequences of length {sequence_length}")
@@ -219,13 +247,21 @@ class TrainingPipeline:
         joblib.dump(self.preprocessor.scaler, os.path.join('models', 'scaler_lstm.joblib'))
         print("Saved scaler_lstm.joblib for app inference.")
         
-        # Save LSTM model
+        # Save LSTM model (both .h5 and .keras for app compatibility)
         if self.lstm_model:
             self.lstm_model.save_model('models/lstm_emotion_model.h5')
+            try:
+                self.lstm_model.save_model('models/lstm_emotion_model.keras')
+            except Exception:
+                logger.debug("Could not save .keras format; .h5 was saved successfully.")
         
-        # Save CNN model
+        # Save CNN model (both formats)
         if self.cnn_model:
             self.cnn_model.save_model('models/cnn1d_emotion_model.h5')
+            try:
+                self.cnn_model.save_model('models/cnn1d_emotion_model.keras')
+            except Exception:
+                logger.debug("Could not save .keras format for CNN; .h5 was saved.")
         
         # Save baseline models
         self.baseline_models.save_models('models/baseline_models')

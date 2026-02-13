@@ -10,8 +10,16 @@ Uses env:
 Load .env via python-dotenv in app if you use a .env file.
 """
 
+from __future__ import annotations
+
+import logging
 import os
 from typing import Optional, List, Dict
+
+logger = logging.getLogger(__name__)
+
+# ── Default duration for AI-generated sample tracks when parsing fails ────
+_DEFAULT_TRACK_DURATION = "3:30"
 
 # Try optional dotenv so .env is loaded when present
 try:
@@ -70,7 +78,7 @@ def get_therapeutic_explanation(
         if resp.choices and resp.choices[0].message.content:
             return resp.choices[0].message.content.strip()
     except Exception:
-        # Fail silently so the app still works without AI
+        logger.warning("Azure OpenAI therapeutic explanation failed", exc_info=True)
         return None
     return None
 
@@ -102,6 +110,7 @@ def get_recommendation_blurb(
         if resp.choices and resp.choices[0].message.content:
             return resp.choices[0].message.content.strip()
     except Exception:
+        logger.warning("Azure OpenAI recommendation blurb failed", exc_info=True)
         return None
     return None
 
@@ -151,6 +160,7 @@ def get_ai_music_styles(
         suggestions = [ln for ln in lines if ln]
         return suggestions[:max_items] if suggestions else None
     except Exception:
+        logger.warning("Azure OpenAI music styles generation failed", exc_info=True)
         return None
 
 
@@ -163,9 +173,11 @@ def get_ai_sample_tracks(
 ) -> Optional[List[Dict[str, str]]]:
     """
     Use Azure OpenAI to suggest example track-like entries (title/artist/duration).
-    These are illustrative placeholders, not real licensed songs.
 
-    Returns list of dicts: {\"title\", \"artist\", \"duration\"}, or None on failure.
+    **Note:** These are AI-generated illustrative suggestions — not guaranteed to
+    correspond to real licensed songs.  The UI should make this clear to the user.
+
+    Returns list of dicts: {"title", "artist", "duration"}, or None on failure.
     """
     if not _is_configured():
         return None
@@ -173,12 +185,12 @@ def get_ai_sample_tracks(
         client = _get_client()
         deployment = os.environ["AZURE_OPENAI_DEPLOYMENT"]
         prompt = (
-            f"Suggest {max_items} example tracks for someone who feels {emotion_name} "
-            f"(arousal={arousal:.2f}, valence={valence:.2f}). These examples are fictional "
-            f"and used only to illustrate the kind of music that could help.\n"
+            f"Suggest {max_items} real, well-known tracks for someone who feels {emotion_name} "
+            f"(arousal={arousal:.2f}, valence={valence:.2f}). "
+            "Pick songs that are widely available on streaming platforms.\n"
             "For each track, include:\n"
-            "- a short evocative title\n"
-            "- an imaginary artist name\n"
+            "- the real title\n"
+            "- the real artist name\n"
             "- an approximate duration in mm:ss\n"
             "Output format:\n"
             "- Return each track on its own line, in the format: Title | Artist | mm:ss\n"
@@ -201,12 +213,13 @@ def get_ai_sample_tracks(
             if len(parts) >= 2:
                 title = parts[0]
                 artist = parts[1]
-                duration = parts[2] if len(parts) >= 3 else "3:00"
+                duration = parts[2] if len(parts) >= 3 else _DEFAULT_TRACK_DURATION
                 tracks.append({"title": title, "artist": artist, "duration": duration})
             if len(tracks) >= max_items:
                 break
         return tracks or None
     except Exception:
+        logger.warning("Azure OpenAI sample tracks generation failed", exc_info=True)
         return None
 
 
