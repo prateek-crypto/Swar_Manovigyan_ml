@@ -1,0 +1,41 @@
+{
+  "feature_columns": [
+    "acousticness",
+    "danceability",
+    "energy",
+    "instrumentalness",
+    "liveness",
+    "loudness",
+    "speechiness",
+    "tempo",
+    "valence",
+    "arousal",
+    "enhanced_valence"
+  ],
+  "mean": {
+    "acousticness": 0.36856045175645075,
+    "danceability": 0.5543644692233323,
+    "energy": 0.5709576734712645,
+    "instrumentalness": 0.14830123363970352,
+    "liveness": 0.21500928452035667,
+    "loudness": -9.56988540122462,
+    "speechiness": 0.12076501450209474,
+    "tempo": 117.66658489203996,
+    "valence": 0.4549168559458589,
+    "arousal": 0.6158373296403933,
+    "enhanced_valence": 0.5024034091588699
+  },
+  "std": {
+    "acousticness": 0.35476804921236155,
+    "danceability": 0.18560823525959605,
+    "energy": 0.2634555721735734,
+    "instrumentalness": 0.30276837432994214,
+    "liveness": 0.19827259487768814,
+    "loudness": 5.998203641890724,
+    "speechiness": 0.18551831588168027,
+    "tempo": 30.89890658626728,
+    "valence": 0.2600654941741866,
+    "arousal": 0.15742844348764956,
+    "enhanced_valence": 0.20799719220000945
+  }
+}
