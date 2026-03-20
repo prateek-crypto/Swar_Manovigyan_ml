@@ -57,6 +57,12 @@ openai>=1.0.0
 python-dotenv>=1.0.0
 
 # ============================================================================
+# FastAPI Backend
+# ============================================================================
+fastapi>=0.104.0              # REST API framework for Next.js frontend
+uvicorn[standard]>=0.24.0     # ASGI server for FastAPI
+
+# ============================================================================
 # Optional: Azure Speech (Text-to-Speech)
 # ============================================================================
 # Required only if you want the Streamlit app to read AI insights aloud.

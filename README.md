@@ -110,12 +110,48 @@ Built on Russell's circumplex model of affect, this system uses Bidirectional LS
 
 ---
 
+## 🖥️ Modern Frontend (Next.js)
+
+A production-grade SaaS-style frontend built with **Next.js 15**, **TypeScript**, **Tailwind CSS**, **shadcn/ui**, **Framer Motion**, and **Recharts**. Replaces the Streamlit UI with a polished, responsive dashboard inspired by Vercel/Linear/Notion.
+
+### Quick Start
+
+```bash
+# Terminal 1 — FastAPI backend (wraps existing ML models)
+pip install fastapi uvicorn
+uvicorn src.backend.server:app --reload --port 8000
+
+# Terminal 2 — Next.js frontend
+cd frontend
+npm install
+npm run dev    # → http://localhost:3000
+```
+
+The frontend works standalone with fallback data when the backend is unavailable — manual A/V selection, hardcoded recommendations, and client-side emotion quadrant mapping all function without a server.
+
+### Frontend Architecture
+
+```
+frontend/src/
+├── app/            # Next.js App Router (pages + API route proxies)
+├── components/     # UI (shadcn), layout, emotion, music, models
+├── hooks/          # useEmotionAnalysis, useTheme
+├── services/       # API client layer with graceful fallbacks
+├── lib/            # Utilities, constants, emotion maps
+└── types/          # Full TypeScript type definitions
+```
+
+> **Note:** The original Streamlit app (`streamlit run src/frontend/app.py`) is still available as an alternative interface.
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.10 or higher
 - pip package manager
+- (Optional) Node.js 18+ for the modern frontend
 - (Optional) Azure OpenAI account for AI-powered features
 
 ### Installation
@@ -155,7 +191,11 @@ python -m src.inference_av \
     --audio_path path/to/audio.wav \
     --checkpoint models/av_regressor.keras
 
-# 4. Launch web application
+# 4a. Launch modern frontend + API backend
+uvicorn src.backend.server:app --reload --port 8000
+cd frontend && npm run dev
+
+# 4b. Or launch classic Streamlit app
 streamlit run src/frontend/app.py
 ```
 
