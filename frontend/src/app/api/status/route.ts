@@ -4,7 +4,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export async function GET() {
   try {
-    const backendRes = await fetch(`${BACKEND_URL}/status`, {
+    const backendRes = await fetch(`${BACKEND_URL}/api/status`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
     });

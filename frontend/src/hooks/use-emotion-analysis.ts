@@ -51,6 +51,7 @@ export function useEmotionAnalysis() {
 
       try {
         let emotion: EmotionResult;
+        let comparisonFeatures: AudioFeatures | undefined;
 
         switch (method) {
           case "manual":
@@ -62,10 +63,13 @@ export function useEmotionAnalysis() {
           case "features":
             if (!params.features) throw new Error("Features are required");
             emotion = await analyzeFeatures(params.features);
+            comparisonFeatures = params.features;
             break;
           case "upload":
             if (!params.file) throw new Error("Audio file is required");
-            emotion = await analyzeAudio(params.file);
+            const uploadResult = await analyzeAudio(params.file);
+            emotion = uploadResult;
+            comparisonFeatures = uploadResult.features;
             break;
         }
 
@@ -76,8 +80,8 @@ export function useEmotionAnalysis() {
             emotion.valence
           ),
           getInsight(emotion.emotion_label, emotion.arousal, emotion.valence),
-          method === "features" && params.features
-            ? getModelComparison(params.features)
+          comparisonFeatures
+            ? getModelComparison(comparisonFeatures)
             : Promise.resolve([]),
         ]);
 

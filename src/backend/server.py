@@ -158,6 +158,7 @@ class AnalyzeResponse(BaseModel):
     arousal: float
     valence: float
     probabilities: Optional[List[float]] = None
+    features: Optional[AudioFeatures] = None
 
 
 class RecommendRequest(BaseModel):
@@ -437,6 +438,19 @@ async def analyze_upload(file: UploadFile = File(...)):
     """Analyze emotion from an uploaded audio file via AV regressor."""
     try:
         audio_bytes = await file.read()
+        extracted_seq, _ = extract_tabular_features_sequence(audio_bytes, sequence_length=10)
+        extracted = extracted_seq[0]
+        extracted_features = AudioFeatures(
+            acousticness=float(extracted[0]),
+            danceability=float(extracted[1]),
+            energy=float(extracted[2]),
+            instrumentalness=float(extracted[3]),
+            liveness=float(extracted[4]),
+            loudness=float(extracted[5]),
+            speechiness=float(extracted[6]),
+            tempo=float(extracted[7]),
+            valence=float(extracted[8]),
+        )
         if state.av_model is None:
             raise HTTPException(503, "AV regressor model not loaded")
 
@@ -474,6 +488,7 @@ async def analyze_upload(file: UploadFile = File(...)):
             confidence=1.0,
             arousal=arousal,
             valence=valence,
+            features=extracted_features,
         )
 
     except HTTPException:

@@ -15,6 +15,8 @@ import { deriveEmotionQuadrant, estimateArousalValence } from "@/lib/utils";
 
 const API_BASE = "";
 
+type UploadAnalyzeResult = EmotionResult & { features?: AudioFeatures };
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, {
     headers: { "Content-Type": "application/json" },
@@ -66,9 +68,9 @@ export async function analyzeFeatures(
   }
 }
 
-export async function analyzeAudio(file: File): Promise<EmotionResult> {
+export async function analyzeAudio(file: File): Promise<UploadAnalyzeResult> {
   const formData = new FormData();
-  formData.append("audio", file);
+  formData.append("file", file);
 
   const res = await fetch(`${API_BASE}/api/analyze/audio`, {
     method: "POST",
@@ -79,7 +81,7 @@ export async function analyzeAudio(file: File): Promise<EmotionResult> {
     throw new Error(`Audio analysis failed: ${res.status}`);
   }
 
-  return res.json() as Promise<EmotionResult>;
+  return res.json() as Promise<UploadAnalyzeResult>;
 }
 
 export async function getRecommendations(

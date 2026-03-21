@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const backendRes = await fetch(`${BACKEND_URL}/analyze/models`, {
+    const backendRes = await fetch(`${BACKEND_URL}/api/analyze/models`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
