@@ -151,8 +151,18 @@ frontend/src/
 
 - Python 3.10 or higher
 - pip package manager
+- Linux users: `python3-venv` (or matching `python3.X-venv`) package installed
 - (Optional) Node.js 18+ for the modern frontend
 - (Optional) Azure OpenAI account for AI-powered features
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv
+# If needed, install version-specific package (example):
+sudo apt install -y python3.12-venv
+```
 
 ### Installation
 
@@ -218,6 +228,7 @@ See `requirements.txt` for complete list. Core dependencies:
 
 - **Azure OpenAI** (`openai`, `python-dotenv`) - For AI-powered recommendations
 - **pytest** ≥7.0.0 - For running test suite
+- **flake8**, **black**, **isort** - For linting and formatting
 
 ### Platform-Specific Notes
 

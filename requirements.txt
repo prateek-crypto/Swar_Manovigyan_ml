@@ -51,6 +51,13 @@ protobuf>=5.28,<6
 pytest>=7.0.0               # Test framework (run: pytest tests/ -v)
 
 # ============================================================================
+# Linting & Formatting
+# ============================================================================
+flake8>=7.0.0               # Python linting
+black>=24.0.0               # Python code formatter
+isort>=5.13.0               # Import sorting
+
+# ============================================================================
 # Optional: Azure OpenAI Integration
 # ============================================================================
 openai>=1.0.0
@@ -75,6 +82,10 @@ azure-cognitiveservices-speech>=1.37.0
 # 
 # Quick Install:
 #   pip install -r requirements.txt
+#
+# Linux (Debian/Ubuntu) system package prerequisite for virtual environments:
+#   sudo apt update && sudo apt install -y python3-venv
+#   # or version-specific package, e.g.: python3.12-venv
 #
 # Windows Users:
 #   - May require Visual C++ Redistributables for TensorFlow:
