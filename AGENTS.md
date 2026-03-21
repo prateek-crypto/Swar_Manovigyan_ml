@@ -8,7 +8,8 @@ Emotion-Aware Music Therapy System — a Python/TensorFlow/Streamlit app that pr
 
 ### Running the App
 
-- Activate venv: `source /workspace/.venv/bin/activate`
+- Create venv (first time only): `python -m venv .venv`
+- Activate venv: `source .venv/bin/activate`
 - Start Streamlit: `streamlit run src/frontend/app.py --server.port 8501 --server.headless true`
 - The app has three input modes: Manual Emotion Selection, Audio Features Input, Audio Upload (A/V)
 
