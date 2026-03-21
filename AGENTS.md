@@ -15,7 +15,7 @@ Emotion-Aware Music Therapy System — a Python/TensorFlow/Streamlit app that pr
 
 ### Testing
 
-- Run all tests: `pytest tests/ -v` (98 tests, all pass; Azure calls are mocked)
+- Run all tests: `pytest tests/ -v` (Azure calls are mocked)
 - See `pytest.ini` for configuration
 
 ### Linting
