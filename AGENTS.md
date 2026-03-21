@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+## Cursor Cloud-specific instructions
 
 ### Project Overview
 
