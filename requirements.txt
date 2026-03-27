@@ -99,3 +99,5 @@ azure-cognitiveservices-speech>=1.37.0
 #   - Python: 3.10+
 #   - TensorFlow: 2.10+ (tested with 2.20+)
 #   - Protobuf: 5.28-5.x (critical for TensorFlow 2.20+ compatibility)
+fastapi
+uvicorn
