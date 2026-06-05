@@ -3,6 +3,7 @@
 > **Emotion-Aware Music Therapy System**  
 > A deep learning platform for personalized music recommendations based on continuous arousal-valence emotion detection from audio signals.
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20558483.svg)](https://doi.org/10.5281/zenodo.20558483)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Adit-Jain-srm/Swar_Manovigyan_ML)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.10+-orange.svg)](https://www.tensorflow.org/)
