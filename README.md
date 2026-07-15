@@ -12,6 +12,13 @@
 
 ---
 
+## 🌐 Live Demo
+
+- Frontend (Vercel): https://swar-manovigyan-oje2j5g3b-prateekmailg444-gmailcoms-projects.vercel.app/
+- Backend API (Render): https://swar-manovigyan-ml.onrender.com/
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
