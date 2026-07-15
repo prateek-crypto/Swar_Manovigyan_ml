@@ -598,6 +598,18 @@ async def analyze_models(req: ModelsRequest):
         raise HTTPException(500, str(e))
 
 
+@app.get("/", include_in_schema=False)
+async def root_health():
+    """Simple health endpoint for container and Render probes."""
+    return {"status": "ok", "service": "backend"}
+
+
+@app.head("/", include_in_schema=False)
+async def root_health_head():
+    """Allow HEAD requests for health checks."""
+    return Response(status_code=200)
+
+
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status():
     """Return which services / models are currently loaded."""

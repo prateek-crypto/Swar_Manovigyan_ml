@@ -10,7 +10,7 @@ services:
         value: 3.11
       - key: PYTHONUNBUFFERED
         value: true
-    healthCheckPath: /api/status
+    healthCheckPath: /
 
   - type: web
     name: swar-manovigyan-frontend
