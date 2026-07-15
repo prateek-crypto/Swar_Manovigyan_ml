@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: swar-manovigyan-backend
+    env: python
+    rootDir: .
+    buildCommand: pip install -r requirements.render.txt
+    startCommand: uvicorn src.backend.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: PYTHONUNBUFFERED
+        value: true
+    healthCheckPath: /api/status
+
+  - type: web
+    name: swar-manovigyan-frontend
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NEXT_PUBLIC_API_URL
+        value: https://swar-manovigyan-backend.onrender.com
